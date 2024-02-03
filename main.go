@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"os"
@@ -104,7 +105,7 @@ func deserializeRow(buf []byte) Row {
 	r := Row{}
 	r.id = binary.LittleEndian.Uint32(buf[:idSize])
 	copy(r.username[:], buf[usernameOffset:usernameOffset+usernameSize])
-	copy(r.email[:], buf[emailOffset:emailOffset+emailOffset])
+	copy(r.email[:], buf[emailOffset:emailOffset+emailSize])
 	return r
 }
 
@@ -124,11 +125,11 @@ func prepareStatement(text string) (*Statement, error) {
 		}
 
 		if len(username) > int(usernameSize) {
-			return nil, fmt.Errorf("expected username of max length %d, but got %d", usernameSize, len(username))
+			return nil, fmt.Errorf("string is too long")
 		}
 
 		if len(email) > int(emailSize) {
-			return nil, fmt.Errorf("expected email of max length %d, but got %d", emailSize, len(email))
+			return nil, fmt.Errorf("string is too long")
 		}
 
 		copy(stmt.rowToInsert.username[:], []byte(username))
@@ -142,12 +143,14 @@ func prepareStatement(text string) (*Statement, error) {
 }
 
 func printRow(row Row) {
-	fmt.Printf("(%d, %s, %s)\n", row.id, row.username, row.email)
+	username := string(bytes.Trim(row.username[:], "\x00"))
+	email := string(bytes.Trim(row.email[:], "\x00"))
+	fmt.Printf("(%d, %s, %s)\n", row.id, username, email)
 }
 
 func executeInsert(stmt *Statement, table *Table) error {
 	if table.numRows >= tableMaxPages {
-		return fmt.Errorf("table is full")
+		return fmt.Errorf("table full")
 	}
 	rawRow, err := rowSlot(table, table.numRows)
 	if err != nil {
@@ -218,7 +221,7 @@ func main() {
 		} else {
 			stmt, err := prepareStatement(text)
 			if err != nil {
-				fmt.Printf("Unrecognized command: %v\n", text)
+				fmt.Printf("Error: %v.\n", err)
 				continue
 			}
 			executeStatement(stmt, table)
