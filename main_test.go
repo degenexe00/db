@@ -93,6 +93,30 @@ func TestErrorIfStringTooLong(t *testing.T) {
 	assertEqual(output, expected, t)
 }
 
+func TestPersistData(t *testing.T) {
+	inputs := []string{
+		"insert 1 michal foo@bar.com",
+		".exit",
+	}
+	expectedOutputs := []string{
+		"simpleDB> Executed.",
+		"simpleDB> ",
+	}
+	output := dbDriver(t, inputs)
+	assertEqual(output, expectedOutputs, t)
+	inputs = []string{
+		"select",
+		".exit",
+	}
+	expectedOutputs = []string{
+		"simpleDB> (1, michal, foo@bar.com)",
+		"Executed.",
+		"simpleDB> ",
+	}
+	output = dbDriver(t, inputs)
+	assertEqual(output, expectedOutputs, t)
+}
+
 func dbDriver(t *testing.T, inputs []string) bytes.Buffer {
 	cmd := exec.Command("./db_from_scratch")
 	stdin, err := cmd.StdinPipe()
