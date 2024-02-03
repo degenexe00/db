@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,8 +12,35 @@ import (
 const cliName string = "simpleRELP"
 const dbName string = "simpleDB"
 
-type statement struct {
-	stmtType statementType
+const idSize uint32 = 4
+const usernameSize uint32 = 32
+const emailSize uint32 = 255
+const idOffset uint32 = 0
+const usernameOffset uint32 = idOffset + idSize
+const emailOffset uint32 = usernameOffset + usernameSize
+const rowSize uint32 = idSize + usernameSize + emailSize
+
+const pageSize uint32 = 4096
+const tableMaxPages uint32 = 100
+const rowsPerPage = pageSize / rowSize
+const tableMaxRows = rowsPerPage * tableMaxPages
+
+type Page [pageSize]byte
+
+type Table struct {
+	numRows uint32
+	pages   []*Page
+}
+
+type Row struct {
+	id       uint32
+	username [usernameSize]byte
+	email    [emailSize]byte
+}
+
+type Statement struct {
+	stmtType    statementType
+	rowToInsert Row
 }
 
 type statementType int
@@ -49,26 +77,126 @@ func handleCmd(cmd string) {
 	fmt.Printf("Unknown command: %v\n", cmd)
 }
 
-func prepareStatement(text string) (*statement, error) {
-	if strings.EqualFold(text, "insert") {
-		return &statement{stmtType: stmtInsert}, nil
+func rowSlot(t *Table, rowNum uint32) ([]byte, error) {
+	pageNum := rowNum / rowsPerPage
+	if pageNum > tableMaxPages {
+		return []byte{}, fmt.Errorf("received %d but expected page number below %d", pageNum, tableMaxPages)
+	}
+
+	if t.pages[pageNum] == nil {
+		t.pages[pageNum] = new(Page)
+	}
+
+	rowOffset := rowNum % rowsPerPage
+	byteOffset := rowOffset * rowSize
+	return t.pages[pageNum][byteOffset : byteOffset+rowSize], nil
+}
+
+func serializeRow(r *Row) []byte {
+	buf := make([]byte, rowSize)
+	binary.LittleEndian.PutUint32(buf[idOffset:], r.id)
+	copy(buf[usernameOffset:], r.username[:])
+	copy(buf[emailOffset:], r.email[:])
+	return buf
+}
+
+func deserializeRow(buf []byte) Row {
+	r := Row{}
+	r.id = binary.LittleEndian.Uint32(buf[:idSize])
+	copy(r.username[:], buf[usernameOffset:usernameOffset+usernameSize])
+	copy(r.email[:], buf[emailOffset:emailOffset+emailOffset])
+	return r
+}
+
+func prepareStatement(text string) (*Statement, error) {
+	if strings.EqualFold(text[:6], "insert") {
+		stmt := Statement{
+			stmtType:    stmtInsert,
+			rowToInsert: Row{},
+		}
+		var username, email string
+		n, err := fmt.Sscanf(text, "insert %d %s %s", &stmt.rowToInsert.id, &username, &email)
+		if err != nil {
+			return nil, err
+		}
+		if n < 3 {
+			return nil, fmt.Errorf("expected 3 arguments for insert, but got %d", n)
+		}
+
+		if len(username) > int(usernameSize) {
+			return nil, fmt.Errorf("expected username of max length %d, but got %d", usernameSize, len(username))
+		}
+
+		if len(email) > int(emailSize) {
+			return nil, fmt.Errorf("expected email of max length %d, but got %d", emailSize, len(email))
+		}
+
+		copy(stmt.rowToInsert.username[:], []byte(username))
+		copy(stmt.rowToInsert.email[:], []byte(email))
+		return &stmt, nil
 	}
 	if strings.EqualFold(text, "select") {
-		return &statement{stmtType: stmtSelect}, nil
+		return &Statement{stmtType: stmtSelect}, nil
 	}
 	return nil, fmt.Errorf("unknown statement: %v", text)
 }
 
-func executeStatement(stmt *statement) {
+func printRow(row Row) {
+	fmt.Printf("(%d, %s, %s)\n", row.id, row.username, row.email)
+}
+
+func executeInsert(stmt *Statement, table *Table) error {
+	if table.numRows >= tableMaxPages {
+		return fmt.Errorf("table is full")
+	}
+	rawRow, err := rowSlot(table, table.numRows)
+	if err != nil {
+		return err
+	}
+	n := copy(rawRow, serializeRow(&stmt.rowToInsert))
+	if n != int(rowSize) {
+		return fmt.Errorf("copied only %d elements, but expected to copy %d elements", n, rowSize)
+	}
+	table.numRows++
+	return nil
+}
+
+func executeSelect(stmt *Statement, table *Table) error {
+	for i := 0; i < int(table.numRows); i++ {
+		rawRow, err := rowSlot(table, uint32(i))
+		if err != nil {
+			return err
+		}
+		row := deserializeRow(rawRow)
+		printRow(row)
+	}
+	return nil
+}
+
+func executeStatement(stmt *Statement, table *Table) {
+	var err error
 	switch stmt.stmtType {
 	case stmtInsert:
-		fmt.Println("TODO: handle insert")
+		err = executeInsert(stmt, table)
 	case stmtSelect:
-		fmt.Println("TODO: handle select")
+		err = executeSelect(stmt, table)
+	}
+	if err != nil {
+		fmt.Printf("Error: %v\n", err.Error())
+		return
+	}
+	fmt.Println("Executed.")
+}
+
+func newTable() *Table {
+	return &Table{
+		numRows: 0,
+		pages:   make([]*Page, tableMaxPages),
 	}
 }
 
 func main() {
+	table := newTable()
 	reader := bufio.NewScanner(os.Stdin)
 	commands := map[string]interface{}{
 		".help":  displayHelp,
@@ -93,7 +221,7 @@ func main() {
 				fmt.Printf("Unrecognized command: %v\n", text)
 				continue
 			}
-			executeStatement(stmt)
+			executeStatement(stmt, table)
 		}
 	}
 }
