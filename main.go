@@ -50,6 +50,35 @@ type Pager struct {
 	pages      [tableMaxPages]*Page
 }
 
+type Cursor struct {
+	table      *Table
+	rowNum     uint32
+	endOfTable bool // Indicates position one past the last element.
+}
+
+func tableStart(table *Table) *Cursor {
+	return &Cursor{
+		table:      table,
+		rowNum:     0,
+		endOfTable: table.numRows == 0,
+	}
+}
+
+func tableEnd(table *Table) *Cursor {
+	return &Cursor{
+		table:      table,
+		rowNum:     table.numRows,
+		endOfTable: true,
+	}
+}
+
+func (c *Cursor) advance() {
+	c.rowNum++
+	if c.rowNum >= c.table.numRows {
+		c.endOfTable = true
+	}
+}
+
 type statementType int
 
 const (
@@ -138,9 +167,10 @@ func dbClose(table *Table) error {
 	return nil
 }
 
-func rowSlot(t *Table, rowNum uint32) ([]byte, error) {
+func (c *Cursor) Value() ([]byte, error) {
+	rowNum := c.rowNum
 	pageNum := rowNum / rowsPerPage
-	page, err := getPage(t.pager, pageNum)
+	page, err := getPage(c.table.pager, pageNum)
 	if err != nil {
 		return []byte{}, err
 	}
@@ -209,7 +239,8 @@ func executeInsert(stmt *Statement, table *Table) error {
 	if table.numRows >= tableMaxPages {
 		return fmt.Errorf("table full")
 	}
-	rawRow, err := rowSlot(table, table.numRows)
+	cursor := tableEnd(table)
+	rawRow, err := cursor.Value()
 	if err != nil {
 		return err
 	}
@@ -222,13 +253,15 @@ func executeInsert(stmt *Statement, table *Table) error {
 }
 
 func executeSelect(stmt *Statement, table *Table) error {
+	cursor := tableStart(table)
 	for i := 0; i < int(table.numRows); i++ {
-		rawRow, err := rowSlot(table, uint32(i))
+		rawRow, err := cursor.Value()
 		if err != nil {
 			return err
 		}
 		row := deserializeRow(rawRow)
 		printRow(row)
+		cursor.advance()
 	}
 	return nil
 }
