@@ -11,6 +11,8 @@ import (
 	"testing"
 )
 
+const dbFile = "test.db"
+
 func TestMain(m *testing.M) {
 	// Compile the binary
 	cmd := exec.Command("go", "build")
@@ -26,7 +28,51 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+func TestPrintStructureOfThreeLeafNode(t *testing.T) {
+	deleteDb()
+	inputs := []string{}
+	for i := 1; i <= 14; i++ {
+		inputs = append(inputs, fmt.Sprintf("insert %d user%d person%d@example.com", i, i, i))
+	}
+	inputs = append(inputs, ".btree")
+	inputs = append(inputs, "insert 15 user15 person15@example.com")
+	inputs = append(inputs, ".exit")
+	expectedOutputs := []string{
+		"simpleDB> Tree:",
+		"leaf (size 3)",
+		"  - 0 : 1",
+		"  - 1 : 2",
+		"  - 2 : 3",
+		"simpleDB> ",
+	}
+	output := dbDriver(t, inputs)
+	assertEqual(output, expectedOutputs, t)
+}
+func TestPrintStructureOneNodeTree(t *testing.T) {
+	deleteDb()
+	inputs := []string{}
+	for i := 1; i <= 3; i++ {
+		inputs = append(inputs, fmt.Sprintf("insert %d user%d person%d@example.com", i, i, i))
+	}
+	inputs = append(inputs, ".btree")
+	inputs = append(inputs, ".exit")
+	expectedOutputs := []string{
+		"simpleDB> Executed.",
+		"simpleDB> Executed.",
+		"simpleDB> Executed.",
+		"simpleDB> Tree:",
+		"leaf (size 3)",
+		"  - 0 : 1",
+		"  - 1 : 2",
+		"  - 2 : 3",
+		"simpleDB> ",
+	}
+	output := dbDriver(t, inputs)
+	assertEqual(output, expectedOutputs, t)
+}
+
 func TestInsertAndSelect(t *testing.T) {
+	deleteDb()
 	inputs := []string{
 		"insert 1 michal foo@bar.com",
 		"select",
@@ -43,8 +89,9 @@ func TestInsertAndSelect(t *testing.T) {
 }
 
 func TestTableIsFull(t *testing.T) {
+	deleteDb()
 	inputs := []string{}
-	for i := 0; i < 1400; i++ {
+	for i := 1; i < 1400; i++ {
 		inputs = append(inputs, fmt.Sprintf("insert %d user%d person%d@example.com", i, i, i))
 	}
 	inputs = append(inputs, ".exit")
@@ -59,6 +106,7 @@ func TestTableIsFull(t *testing.T) {
 }
 
 func TestMaximumLengthStrings(t *testing.T) {
+	deleteDb()
 	longUsername := strings.Repeat("a", 32)
 	longEmail := strings.Repeat("a", 255)
 	inputs := []string{
@@ -77,6 +125,7 @@ func TestMaximumLengthStrings(t *testing.T) {
 }
 
 func TestErrorIfStringTooLong(t *testing.T) {
+	deleteDb()
 	longUsername := strings.Repeat("a", 33)
 	longEmail := strings.Repeat("a", 256)
 	inputs := []string{
@@ -94,6 +143,7 @@ func TestErrorIfStringTooLong(t *testing.T) {
 }
 
 func TestPersistData(t *testing.T) {
+	deleteDb()
 	inputs := []string{
 		"insert 1 michal foo@bar.com",
 		".exit",
@@ -118,7 +168,7 @@ func TestPersistData(t *testing.T) {
 }
 
 func dbDriver(t *testing.T, inputs []string) bytes.Buffer {
-	cmd := exec.Command("./db_from_scratch")
+	cmd := exec.Command("./db_from_scratch", dbFile)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatalf("Failed to open stdin: %v", err)
@@ -155,7 +205,7 @@ func assertEqual(stdout bytes.Buffer, expected []string, t *testing.T) {
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line != expected[i] {
-			t.Errorf("Unexpected output,\ngot: '%s'\nexpected: '%s'\n", line, expected[i])
+			t.Fatalf("Unexpected output,\ngot: '%s'\nexpected: '%s'\n", line, expected[i])
 		}
 		i++
 	}
@@ -173,4 +223,8 @@ func sendCommands(stdin io.WriteCloser, commands []string) error {
 		}
 	}
 	return nil
+}
+
+func deleteDb() {
+	os.Remove("test.db")
 }
