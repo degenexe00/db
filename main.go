@@ -27,9 +27,9 @@ const tableMaxPages uint32 = 100
 
 // Node Header Layout
 const (
-	nodeTypeSize         uint32 = 2
+	nodeTypeSize         uint32 = 1
 	nodeTypeOffset       uint32 = 0
-	isRootSize           uint32 = 2
+	isRootSize           uint32 = 1
 	isRootOffset         uint32 = nodeTypeSize
 	parentPointerSize    uint32 = 4
 	parentPointerOffset  uint32 = isRootOffset + isRootSize
@@ -76,6 +76,7 @@ const (
 	internalNodeKeySize   uint32 = 4
 	internalNodeChildSize uint32 = 4
 	internalNodeCellSize  uint32 = internalNodeChildSize + internalNodeKeySize
+	internalNodeMaxCells  uint32 = 3 // Keep this small for testing.
 )
 
 type nodeType uint8
@@ -139,10 +140,11 @@ func tableFind(table *Table, key uint32) *Cursor {
 	}
 }
 
-func internalNodeFind(table *Table, pageNum uint32, key uint32) *Cursor {
-	node := getPage(table.pager, pageNum)
+// Returns the index of the child which should contain the given key.
+func internalNodeFindChild(node []byte, key uint32) uint32 {
 	numKeys := binary.LittleEndian.Uint32(internalNodeNumKeys(node))
 
+	// Binary search
 	minIdx := uint32(0)
 	maxIdx := numKeys
 
@@ -155,7 +157,15 @@ func internalNodeFind(table *Table, pageNum uint32, key uint32) *Cursor {
 			minIdx = midIdx + 1
 		}
 	}
-	childNum := binary.LittleEndian.Uint32(internalNodeChild(node, minIdx))
+	return minIdx
+
+}
+
+func internalNodeFind(table *Table, pageNum uint32, key uint32) *Cursor {
+	node := getPage(table.pager, pageNum)
+
+	childIdx := internalNodeFindChild(node, key)
+	childNum := binary.LittleEndian.Uint32(internalNodeChild(node, childIdx))
 	child := getPage(table.pager, childNum)
 	t := getNodeType(child)
 	if t == nodeLeaf {
@@ -203,7 +213,7 @@ func setNodeType(node []byte, nt nodeType) {
 }
 
 func leafNodeNumCells(node []byte) []byte {
-	return node[leafNodeNumCellsOffset:]
+	return node[leafNodeNumCellsOffset : leafNodeNumCellsOffset+leafNodeNumCellsSize]
 }
 
 func leafNodeNextLeaf(node []byte) []byte {
@@ -237,15 +247,18 @@ func initializeInternalNode(node []byte) {
 }
 
 func internalNodeNumKeys(node []byte) []byte {
-	return node[internalNodeNumKeysOffset:]
+	return node[internalNodeNumKeysOffset : internalNodeNumKeysOffset+internalNodeNumKeysSize]
 }
 
 func internalNodeRightChild(node []byte) []byte {
-	return node[internalNodeRightChildOffset:]
+	return node[internalNodeRightChildOffset : internalNodeRightChildOffset+internalNodeRightChildSize]
 }
 
 func internalNodeCell(node []byte, cellNum uint32) []byte {
-	return node[internalNodeHeaderSize+cellNum*internalNodeCellSize:]
+	log.Printf("%d %d %d\n", internalNodeHeaderSize, cellNum, internalNodeCellSize)
+	offset := internalNodeHeaderSize + cellNum*internalNodeCellSize
+	log.Printf("offset, %d\n", offset)
+	return node[offset : offset+internalNodeCellSize]
 }
 
 func internalNodeChild(node []byte, childNum uint32) []byte {
@@ -260,6 +273,15 @@ func internalNodeChild(node []byte, childNum uint32) []byte {
 
 func internalNodeKey(node []byte, keyNum uint32) []byte {
 	return internalNodeCell(node, keyNum)[internalNodeChildSize:]
+}
+
+func nodeParent(node []byte) []byte {
+	return node[parentPointerOffset : parentPointerOffset+parentPointerSize]
+}
+
+func updateInternalNodeKey(node []byte, oldKey uint32, newKey uint32) {
+	oldChildIdx := internalNodeFindChild(node, oldKey)
+	binary.LittleEndian.PutUint32(internalNodeKey(node, oldChildIdx), newKey)
 }
 
 func isNodeRoot(node []byte) bool {
@@ -293,6 +315,42 @@ func getUnusedPageNum(pager *Pager) uint32 {
 	return pager.numPages
 }
 
+// Inserts a new child key pair to parent that corresponds to the child.
+func internalNodeInsert(table *Table, parentPageNum uint32, childPageNum uint32) {
+	parent := getPage(table.pager, parentPageNum)
+	child := getPage(table.pager, childPageNum)
+
+	childMaxKey := getNodeMaxKey(child)
+	index := internalNodeFindChild(parent, childMaxKey)
+
+	// Increment number of keys in parent.
+	originalNumKeys := binary.LittleEndian.Uint32(internalNodeNumKeys(parent))
+	binary.LittleEndian.PutUint32(internalNodeNumKeys(parent), originalNumKeys+1)
+
+	if originalNumKeys >= internalNodeMaxCells {
+		log.Fatal("Need to implement splitting inernal node.")
+	}
+
+	rightChildPageNum := binary.LittleEndian.Uint32(internalNodeRightChild(parent))
+	rightChild := getPage(table.pager, rightChildPageNum)
+
+	if childMaxKey > getNodeMaxKey(rightChild) {
+		// Replace right child.
+		binary.LittleEndian.PutUint32(internalNodeChild(parent, originalNumKeys), rightChildPageNum)
+		binary.LittleEndian.PutUint32(internalNodeKey(parent, originalNumKeys), getNodeMaxKey(rightChild))
+		binary.LittleEndian.PutUint32(internalNodeRightChild(parent), childPageNum)
+	} else {
+		// Make room for a new cell.
+		for i := originalNumKeys; i > index; i-- {
+			dest := internalNodeCell(parent, i)
+			source := internalNodeCell(parent, i-1)
+			copy(dest, source)
+		}
+		binary.BigEndian.PutUint32(internalNodeChild(parent, index), childPageNum)
+		binary.BigEndian.PutUint32(internalNodeKey(parent, index), childMaxKey)
+	}
+}
+
 /*
 Handle splitting the root.
 
@@ -303,7 +361,7 @@ New root node points to two children.
 */
 func createNewRoot(table *Table, rightChildPageNum uint32) {
 	root := getPage(table.pager, table.rootPageNum)
-	getPage(table.pager, rightChildPageNum)
+	rightChild := getPage(table.pager, rightChildPageNum)
 	leftChildPageNum := getUnusedPageNum(table.pager)
 	leftChild := getPage(table.pager, leftChildPageNum)
 
@@ -319,6 +377,8 @@ func createNewRoot(table *Table, rightChildPageNum uint32) {
 	leftChildMaxKey := getNodeMaxKey(leftChild)
 	binary.LittleEndian.PutUint32(internalNodeKey(root, 0), leftChildMaxKey)
 	binary.LittleEndian.PutUint32(internalNodeRightChild(root), rightChildPageNum)
+	binary.LittleEndian.PutUint32(nodeParent(leftChild), table.rootPageNum)
+	binary.LittleEndian.PutUint32(nodeParent(rightChild), table.rootPageNum)
 }
 
 /*
@@ -329,9 +389,11 @@ Updates parent or creates a new parent.
 */
 func leafNodeSplitAndInsert(cursor *Cursor, key uint32, value *Row) {
 	oldNode := getPage(cursor.table.pager, cursor.pageNum)
+	oldMax := getNodeMaxKey(oldNode)
 	newPageNum := getUnusedPageNum(cursor.table.pager)
 	newNode := getPage(cursor.table.pager, newPageNum)
 	initializeLeafNode(newNode)
+	copy(nodeParent(newNode), nodeParent(oldNode))
 	copy(leafNodeNextLeaf(newNode), leafNodeNextLeaf(oldNode))
 	binary.LittleEndian.PutUint32(leafNodeNextLeaf(oldNode), newPageNum)
 
@@ -366,7 +428,12 @@ func leafNodeSplitAndInsert(cursor *Cursor, key uint32, value *Row) {
 	if isNodeRoot(oldNode) {
 		createNewRoot(cursor.table, newPageNum)
 	} else {
-		log.Fatal("Need to implement updating parent after split.")
+		parentPageNum := binary.LittleEndian.Uint32(nodeParent(oldNode))
+		newMax := getNodeMaxKey(oldNode)
+		parent := getPage(cursor.table.pager, parentPageNum)
+
+		updateInternalNodeKey(parent, oldMax, newMax)
+		internalNodeInsert(cursor.table, parentPageNum, newPageNum)
 	}
 }
 
