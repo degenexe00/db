@@ -303,7 +303,7 @@ func leafNodeSplitAndInsert(cursor *Cursor, key uint32, value *Row) {
 	newNode := getPage(cursor.table.pager, newPageNum)
 	initializeLeafNode(newNode)
 
-	// Existing keys should be divded evenly between old (left) and new (right) nodes.
+	// Existing keys should be divided evenly between old (left) and new (right) nodes.
 	// Starting from the right, move each key to the correct position.
 	for i := int(leafNodeMaxCells); i >= 0; i-- {
 		var destNode = []byte{}
@@ -316,6 +316,7 @@ func leafNodeSplitAndInsert(cursor *Cursor, key uint32, value *Row) {
 		destination := leafNodeCell(destNode, indexWithinNode)
 
 		if uint32(i) == cursor.cellNum {
+			// inserts new row
 			copy(destination, serializeRow(value))
 		} else if uint32(i) > cursor.cellNum {
 			copy(destination, leafNodeCell(oldNode, uint32(i)-1))

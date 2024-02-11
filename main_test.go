@@ -38,16 +38,45 @@ func TestPrintStructureOfThreeLeafNode(t *testing.T) {
 	inputs = append(inputs, "insert 15 user15 person15@example.com")
 	inputs = append(inputs, ".exit")
 	expectedOutputs := []string{
+		"simpleDB> Executed.",
+		"simpleDB> Executed.",
+		"simpleDB> Executed.",
+		"simpleDB> Executed.",
+		"simpleDB> Executed.",
+		"simpleDB> Executed.",
+		"simpleDB> Executed.",
+		"simpleDB> Executed.",
+		"simpleDB> Executed.",
+		"simpleDB> Executed.",
+		"simpleDB> Executed.",
+		"simpleDB> Executed.",
+		"simpleDB> Executed.",
+		"simpleDB> Executed.",
 		"simpleDB> Tree:",
-		"leaf (size 3)",
-		"  - 0 : 1",
-		"  - 1 : 2",
-		"  - 2 : 3",
+		"- internal (size 1)",
+		"  - leaf (size 7)",
+		"    - 1",
+		"    - 2",
+		"    - 3",
+		"    - 4",
+		"    - 5",
+		"    - 6",
+		"    - 7",
+		"  - key 7",
+		"  - leaf (size 7)",
+		"    - 8",
+		"    - 9",
+		"    - 10",
+		"    - 11",
+		"    - 12",
+		"    - 13",
+		"    - 14",
 		"simpleDB> ",
 	}
 	output := dbDriver(t, inputs)
 	assertEqual(output, expectedOutputs, t)
 }
+
 func TestPrintStructureOneNodeTree(t *testing.T) {
 	deleteDb()
 	inputs := []string{}
@@ -61,10 +90,10 @@ func TestPrintStructureOneNodeTree(t *testing.T) {
 		"simpleDB> Executed.",
 		"simpleDB> Executed.",
 		"simpleDB> Tree:",
-		"leaf (size 3)",
-		"  - 0 : 1",
-		"  - 1 : 2",
-		"  - 2 : 3",
+		"- leaf (size 3)",
+		"  - 1",
+		"  - 2",
+		"  - 3",
 		"simpleDB> ",
 	}
 	output := dbDriver(t, inputs)
