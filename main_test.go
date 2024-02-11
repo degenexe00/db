@@ -71,6 +71,53 @@ func TestPrintStructureOfThreeLeafNode(t *testing.T) {
 		"    - 12",
 		"    - 13",
 		"    - 14",
+		"simpleDB> Executed.",
+		"simpleDB> ",
+	}
+	output := dbDriver(t, inputs)
+	assertEqual(output, expectedOutputs, t)
+}
+
+func TestSelectAllMultiLevel(t *testing.T) {
+	deleteDb()
+	inputs := []string{}
+	for i := 1; i <= 15; i++ {
+		inputs = append(inputs, fmt.Sprintf("insert %d user%d person%d@example.com", i, i, i))
+	}
+	inputs = append(inputs, "select")
+	inputs = append(inputs, ".exit")
+	expectedOutputs := []string{
+		"simpleDB> Executed.",
+		"simpleDB> Executed.",
+		"simpleDB> Executed.",
+		"simpleDB> Executed.",
+		"simpleDB> Executed.",
+		"simpleDB> Executed.",
+		"simpleDB> Executed.",
+		"simpleDB> Executed.",
+		"simpleDB> Executed.",
+		"simpleDB> Executed.",
+		"simpleDB> Executed.",
+		"simpleDB> Executed.",
+		"simpleDB> Executed.",
+		"simpleDB> Executed.",
+		"simpleDB> Executed.",
+		"simpleDB> (1, user1, person1@example.com)",
+		"(2, user2, person2@example.com)",
+		"(3, user3, person3@example.com)",
+		"(4, user4, person4@example.com)",
+		"(5, user5, person5@example.com)",
+		"(6, user6, person6@example.com)",
+		"(7, user7, person7@example.com)",
+		"(8, user8, person8@example.com)",
+		"(9, user9, person9@example.com)",
+		"(10, user10, person10@example.com)",
+		"(11, user11, person11@example.com)",
+		"(12, user12, person12@example.com)",
+		"(13, user13, person13@example.com)",
+		"(14, user14, person14@example.com)",
+		"(15, user15, person15@example.com)",
+		"Executed.",
 		"simpleDB> ",
 	}
 	output := dbDriver(t, inputs)
@@ -234,7 +281,7 @@ func assertEqual(stdout bytes.Buffer, expected []string, t *testing.T) {
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line != expected[i] {
-			t.Fatalf("Unexpected output,\ngot: '%s'\nexpected: '%s'\n", line, expected[i])
+			t.Fatalf("Unexpected output on line %d,\ngot: '%s'\nexpected: '%s'\n", i, line, expected[i])
 		}
 		i++
 	}
