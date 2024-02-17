@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-const cliName string = "simpleRELP"
+const cliName string = "simpleREPL"
 const dbName string = "simpleDB"
 
 const idSize uint32 = 4
@@ -143,7 +143,6 @@ func tableFind(table *Table, key uint32) *Cursor {
 // Returns the index of the child which should contain the given key.
 func internalNodeFindChild(node []byte, key uint32) uint32 {
 	numKeys := binary.LittleEndian.Uint32(internalNodeNumKeys(node))
-
 	// Binary search
 	minIdx := uint32(0)
 	maxIdx := numKeys
@@ -158,7 +157,6 @@ func internalNodeFindChild(node []byte, key uint32) uint32 {
 		}
 	}
 	return minIdx
-
 }
 
 func internalNodeFind(table *Table, pageNum uint32, key uint32) *Cursor {
@@ -255,10 +253,9 @@ func internalNodeRightChild(node []byte) []byte {
 }
 
 func internalNodeCell(node []byte, cellNum uint32) []byte {
-	log.Printf("%d %d %d\n", internalNodeHeaderSize, cellNum, internalNodeCellSize)
 	offset := internalNodeHeaderSize + cellNum*internalNodeCellSize
-	log.Printf("offset, %d\n", offset)
-	return node[offset : offset+internalNodeCellSize]
+	res := node[offset : offset+internalNodeCellSize]
+	return res
 }
 
 func internalNodeChild(node []byte, childNum uint32) []byte {
@@ -329,6 +326,7 @@ func internalNodeInsert(table *Table, parentPageNum uint32, childPageNum uint32)
 
 	if originalNumKeys >= internalNodeMaxCells {
 		log.Fatal("Need to implement splitting inernal node.")
+		return
 	}
 
 	rightChildPageNum := binary.LittleEndian.Uint32(internalNodeRightChild(parent))
@@ -346,8 +344,9 @@ func internalNodeInsert(table *Table, parentPageNum uint32, childPageNum uint32)
 			source := internalNodeCell(parent, i-1)
 			copy(dest, source)
 		}
-		binary.BigEndian.PutUint32(internalNodeChild(parent, index), childPageNum)
-		binary.BigEndian.PutUint32(internalNodeKey(parent, index), childMaxKey)
+		// Something changes here for unknown reasons!?
+		binary.LittleEndian.PutUint32(internalNodeChild(parent, index), childPageNum)
+		binary.LittleEndian.PutUint32(internalNodeKey(parent, index), childMaxKey)
 	}
 }
 
@@ -434,6 +433,49 @@ func leafNodeSplitAndInsert(cursor *Cursor, key uint32, value *Row) {
 
 		updateInternalNodeKey(parent, oldMax, newMax)
 		internalNodeInsert(cursor.table, parentPageNum, newPageNum)
+	}
+}
+
+func formatNode(node []byte) {
+	nt := nodeType(node[nodeTypeOffset])
+	if nt == nodeInternal {
+		isRoot := uint8(node[isRootOffset])
+		parentPtr := binary.LittleEndian.Uint32(node[parentPointerOffset:])
+		numKeys := binary.LittleEndian.Uint32(node[internalNodeNumKeysOffset:])
+		rightChildPtr := binary.LittleEndian.Uint32(node[internalNodeRightChildOffset:])
+
+		fmt.Printf("node type: %d\n", nt)
+		fmt.Printf("is root: %d\n", isRoot)
+		fmt.Printf("parent ptr: %d\n", parentPtr)
+		fmt.Printf("num keys: %d\n", numKeys)
+		fmt.Printf("rightChildPtr: %d\n", rightChildPtr)
+
+		ptr := internalNodeHeaderSize
+		for i := uint32(0); i < numKeys; i++ {
+			childPtr := binary.LittleEndian.Uint32(node[ptr:])
+			childKey := binary.LittleEndian.Uint32(node[ptr+internalNodeChildSize:])
+			fmt.Printf("child ptr: %d - key %d\n", childPtr, childKey)
+			ptr += internalNodeCellSize
+		}
+	} else {
+		isRoot := uint8(node[isRootOffset])
+		parentPtr := binary.LittleEndian.Uint32(node[parentPointerOffset:])
+		numCells := binary.LittleEndian.Uint32(node[leafNodeNumCellsOffset:])
+		nextLeafPageNum := binary.LittleEndian.Uint32(node[leafNodeNextLeafOffset:])
+		fmt.Printf("node type: %d\n", nt)
+		fmt.Printf("is root: %d\n", isRoot)
+		fmt.Printf("parent ptr: %d\n", parentPtr)
+		fmt.Printf("num cells: %d\n", numCells)
+		fmt.Printf("next leaf page num: %d\n", nextLeafPageNum)
+
+		i := leafNodeHeaderSize
+		for i+leafNodeCellSize < pageSize {
+			key := binary.LittleEndian.Uint32(node[i:])
+			row := deserializeRow(node[i+leafNodeKeySize:])
+			fmt.Printf("key: %d - row %+v\n", key, row)
+			i += leafNodeCellSize
+		}
+		fmt.Printf("Leaf Node ends at offset %d\n", i)
 	}
 }
 
