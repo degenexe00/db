@@ -156,6 +156,12 @@ func initializeInternalNode(node []byte) {
 	setNodeType(node, types.NodeInternal)
 	setNodeRoot(node, false)
 	binary.LittleEndian.PutUint32(internalNodeNumKeys(node), 0)
+	/*
+		Necessary because the root page number is 0. By not initializing the internal node's
+		right child to an invalid page number, we may end up with 0 as the node's right child,
+		which makes the node the parent of the root.
+	*/
+	binary.LittleEndian.PutUint32(internalNodeRightChild(node), constants.InvalidPageNum)
 }
 
 func internalNodeNumKeys(node []byte) []byte {
@@ -177,9 +183,20 @@ func internalNodeChild(node []byte, childNum uint32) []byte {
 	if childNum > numKeys {
 		log.Fatalf("Tried to access childNum %d > numKeys %d\n", childNum, numKeys)
 	} else if childNum == numKeys {
-		return internalNodeRightChild(node)
+		rightChild := internalNodeRightChild(node)
+		rightChildNum := binary.LittleEndian.Uint32(rightChild)
+		if rightChildNum == constants.InvalidPageNum {
+			log.Fatal("Tried to access right child of node, but it was invalid page.")
+		}
+		return rightChild
 	}
-	return internalNodeCell(node, childNum)
+
+	child := internalNodeCell(node, childNum)
+	childPageNum := binary.LittleEndian.Uint32(child)
+	if childPageNum == constants.InvalidPageNum {
+		log.Fatalf("Tried to access child %d of node, but it was invalid page.", childPageNum)
+	}
+	return child
 }
 
 func internalNodeKey(node []byte, keyNum uint32) []byte {
@@ -208,17 +225,14 @@ func setNodeRoot(node []byte, isRoot bool) {
 	}
 }
 
-func getNodeMaxKey(node []byte) uint32 {
-	switch getNodeType(node) {
-	case types.NodeInternal:
-		numKeys := binary.LittleEndian.Uint32(internalNodeNumKeys(node)) - 1
-		return binary.LittleEndian.Uint32(internalNodeKey(node, numKeys))
-	case types.NodeLeaf:
-		numCells := binary.LittleEndian.Uint32(leafNodeNumCells(node)) - 1
-		return binary.LittleEndian.Uint32(leafNodeKey(node, numCells))
+func getNodeMaxKey(pager *Pager, node []byte) uint32 {
+	if getNodeType(node) == types.NodeLeaf {
+		numCells := binary.LittleEndian.Uint32(leafNodeNumCells(node))
+		return binary.LittleEndian.Uint32(leafNodeKey(node, numCells-1))
 	}
-	log.Fatalf("Uknown node type: %v", getNodeType(node))
-	return 0
+	rightChildPageNum := binary.LittleEndian.Uint32(internalNodeRightChild(node))
+	rightChild := getPage(pager, rightChildPageNum)
+	return getNodeMaxKey(pager, rightChild)
 }
 
 // Until we start recycling free pages, new pages will always go onto the end of the db file.
@@ -226,30 +240,137 @@ func getUnusedPageNum(pager *Pager) uint32 {
 	return pager.numPages
 }
 
+func internalNodeSplitAndInsert(table *Table, parentPageNum uint32, childPageNum uint32) {
+	oldPageNum := parentPageNum
+	oldNode := getPage(table.pager, parentPageNum)
+	oldMax := getNodeMaxKey(table.pager, oldNode)
+
+	child := getPage(table.pager, childPageNum)
+	childMax := getNodeMaxKey(table.pager, child)
+
+	newPageNum := getUnusedPageNum(table.pager)
+
+	/*
+	  Declaring a flag before updating pointers which
+	  records whether this operation involves splitting the root -
+	  if it does, we will insert our newly created node during
+	  the step where the table's new root is created. If it does
+	  not, we have to insert the newly created node into its parent
+	  after the old node's keys have been transferred over. We are not
+	  able to do this if the newly created node's parent is not a newly
+	  initialized root node, because in that case its parent may have existing
+	  keys aside from our old node which we are splitting. If that is true, we
+	  need to find a place for our newly created node in its parent, and we
+	  cannot insert it at the correct index if it does not yet have any keys
+	*/
+
+	splittingRoot := isNodeRoot(oldNode)
+
+	var parent []byte
+	var newNode []byte
+	if splittingRoot {
+		createNewRoot(table, newPageNum)
+		parent = getPage(table.pager, table.rootPageNum)
+		/*
+			If we are splitting the root, we need to update the oldNode
+			to point to the new root's left child, newPageNum will already
+			point to the new root's right child.
+		*/
+		oldPageNum = binary.LittleEndian.Uint32(internalNodeChild(parent, 0))
+		oldNode = getPage(table.pager, oldPageNum)
+	} else {
+		parent = getPage(table.pager, binary.LittleEndian.Uint32(nodeParent(oldNode)))
+		newNode = getPage(table.pager, newPageNum)
+		initializeInternalNode(newNode)
+	}
+
+	oldNumKeys := internalNodeNumKeys(oldNode)
+
+	curPageNum := binary.LittleEndian.Uint32(internalNodeRightChild(oldNode))
+	cur := getPage(table.pager, curPageNum)
+
+	// First put right child into the new node and set right child of node to invalid page number.
+	internalNodeInsert(table, newPageNum, curPageNum)
+	binary.LittleEndian.PutUint32(nodeParent(cur), newPageNum)
+	binary.LittleEndian.PutUint32(internalNodeRightChild(oldNode), constants.InvalidPageNum)
+	// For each key until you get to the middle key, move the child to the new node.
+	for i := constants.InternalNodeMaxCells - 1; i > constants.InternalNodeMaxCells/2; i-- {
+		curPageNum = binary.LittleEndian.Uint32(internalNodeChild(oldNode, i))
+		cur = getPage(table.pager, curPageNum)
+
+		internalNodeInsert(table, newPageNum, curPageNum)
+		binary.LittleEndian.PutUint32(nodeParent(cur), newPageNum)
+
+		oldNumKeysNum := binary.LittleEndian.Uint32(oldNumKeys)
+		binary.LittleEndian.PutUint32(nodeParent(cur), newPageNum)
+		binary.LittleEndian.PutUint32(oldNumKeys, oldNumKeysNum-1)
+	}
+
+	/*
+		Set child before middle key, which is now the highest key, to be the node's right child
+		and decrement number of keys.
+	*/
+	oldNumKeysNum := binary.LittleEndian.Uint32(oldNumKeys)
+	copy(internalNodeRightChild(oldNode), internalNodeChild(oldNode, oldNumKeysNum-1))
+
+	/*
+		Determine which of the two nodes after the split should contain the child
+		and insert it there.
+	*/
+	maxAfterSplit := getNodeMaxKey(table.pager, oldNode)
+	destPageNum := newPageNum
+	if childMax < maxAfterSplit {
+		destPageNum = oldPageNum
+	}
+
+	internalNodeInsert(table, destPageNum, childPageNum)
+	binary.LittleEndian.PutUint32(nodeParent(child), destPageNum)
+
+	updateInternalNodeKey(parent, oldMax, getNodeMaxKey(table.pager, oldNode))
+
+	if !splittingRoot {
+		parentNum := binary.LittleEndian.Uint32(nodeParent(oldNode))
+		internalNodeInsert(table, parentNum, newPageNum)
+		copy(nodeParent(newNode), nodeParent(oldNode))
+	}
+}
+
 // Inserts a new child key pair to parent that corresponds to the child.
 func internalNodeInsert(table *Table, parentPageNum uint32, childPageNum uint32) {
 	parent := getPage(table.pager, parentPageNum)
 	child := getPage(table.pager, childPageNum)
 
-	childMaxKey := getNodeMaxKey(child)
+	childMaxKey := getNodeMaxKey(table.pager, child)
 	index := internalNodeFindChild(parent, childMaxKey)
 
 	// Increment number of keys in parent.
 	originalNumKeys := binary.LittleEndian.Uint32(internalNodeNumKeys(parent))
-	binary.LittleEndian.PutUint32(internalNodeNumKeys(parent), originalNumKeys+1)
 
 	if originalNumKeys >= constants.InternalNodeMaxCells {
-		log.Fatal("Need to implement splitting inernal node.")
+		internalNodeSplitAndInsert(table, parentPageNum, childPageNum)
 		return
 	}
 
 	rightChildPageNum := binary.LittleEndian.Uint32(internalNodeRightChild(parent))
-	rightChild := getPage(table.pager, rightChildPageNum)
+	// Internal node with a right child of INVALID_PAGE_NUM is empty.
+	if rightChildPageNum == constants.InvalidPageNum {
+		binary.LittleEndian.PutUint32(internalNodeRightChild(parent), childPageNum)
+		return
+	}
 
-	if childMaxKey > getNodeMaxKey(rightChild) {
+	rightChild := getPage(table.pager, rightChildPageNum)
+	/*
+		If we are laready at the max number of cells for a node, we cannot increment
+		before splitting. Incrementing without inserting a new key/child pair
+		and immediately calling internalNodeSplitAndInsert hsa the effect of creating
+		a new key at (maxCells + 1) with an unitialized value.
+	*/
+	binary.LittleEndian.PutUint32(internalNodeNumKeys(parent), originalNumKeys+1)
+
+	if childMaxKey > getNodeMaxKey(table.pager, rightChild) {
 		// Replace right child.
 		binary.LittleEndian.PutUint32(internalNodeChild(parent, originalNumKeys), rightChildPageNum)
-		binary.LittleEndian.PutUint32(internalNodeKey(parent, originalNumKeys), getNodeMaxKey(rightChild))
+		binary.LittleEndian.PutUint32(internalNodeKey(parent, originalNumKeys), getNodeMaxKey(table.pager, rightChild))
 		binary.LittleEndian.PutUint32(internalNodeRightChild(parent), childPageNum)
 	} else {
 		// Make room for a new cell.
@@ -278,16 +399,34 @@ func createNewRoot(table *Table, rightChildPageNum uint32) {
 	leftChildPageNum := getUnusedPageNum(table.pager)
 	leftChild := getPage(table.pager, leftChildPageNum)
 
+	if getNodeType(root) == types.NodeInternal {
+		initializeInternalNode(rightChild)
+		initializeInternalNode(leftChild)
+	}
+
 	// Old root is copied into left child.
 	copy(leftChild, root)
 	setNodeRoot(leftChild, false)
+
+	if getNodeType(leftChild) == types.NodeInternal {
+		var child []byte
+		numKeys := binary.LittleEndian.Uint32(internalNodeNumKeys(leftChild))
+		for i := uint32(0); i < numKeys; i++ {
+			childPageNum := binary.LittleEndian.Uint32(internalNodeChild(leftChild, i))
+			child = getPage(table.pager, childPageNum)
+			binary.LittleEndian.PutUint32(nodeParent(child), leftChildPageNum)
+		}
+		rcPageNum := binary.LittleEndian.Uint32(internalNodeRightChild(leftChild))
+		child = getPage(table.pager, rcPageNum)
+		binary.LittleEndian.PutUint32(nodeParent(child), leftChildPageNum)
+	}
 
 	// Root node is a new internal node with one key and two children.
 	initializeInternalNode(root)
 	setNodeRoot(root, true)
 	binary.LittleEndian.PutUint32(internalNodeNumKeys(root), 1)
 	binary.LittleEndian.PutUint32(internalNodeChild(root, 0), leftChildPageNum)
-	leftChildMaxKey := getNodeMaxKey(leftChild)
+	leftChildMaxKey := getNodeMaxKey(table.pager, leftChild)
 	binary.LittleEndian.PutUint32(internalNodeKey(root, 0), leftChildMaxKey)
 	binary.LittleEndian.PutUint32(internalNodeRightChild(root), rightChildPageNum)
 	binary.LittleEndian.PutUint32(nodeParent(leftChild), table.rootPageNum)
@@ -302,7 +441,7 @@ Updates parent or creates a new parent.
 */
 func leafNodeSplitAndInsert(cursor *Cursor, key uint32, value *types.Row) {
 	oldNode := getPage(cursor.table.pager, cursor.pageNum)
-	oldMax := getNodeMaxKey(oldNode)
+	oldMax := getNodeMaxKey(cursor.table.pager, oldNode)
 	newPageNum := getUnusedPageNum(cursor.table.pager)
 	newNode := getPage(cursor.table.pager, newPageNum)
 	initializeLeafNode(newNode)
@@ -342,7 +481,7 @@ func leafNodeSplitAndInsert(cursor *Cursor, key uint32, value *types.Row) {
 		createNewRoot(cursor.table, newPageNum)
 	} else {
 		parentPageNum := binary.LittleEndian.Uint32(nodeParent(oldNode))
-		newMax := getNodeMaxKey(oldNode)
+		newMax := getNodeMaxKey(cursor.table.pager, oldNode)
 		parent := getPage(cursor.table.pager, parentPageNum)
 
 		updateInternalNodeKey(parent, oldMax, newMax)
@@ -453,11 +592,14 @@ func displayTree(pager *Pager, pageNum uint32, indentLevel uint32) {
 		numKeys = binary.LittleEndian.Uint32(internalNodeNumKeys(node))
 		indent(indentLevel)
 		fmt.Printf("- internal (size %d)\n", numKeys)
-		for i := uint32(0); i < numKeys; i++ {
-			child = binary.LittleEndian.Uint32(internalNodeChild(node, i))
-			displayTree(pager, child, indentLevel+1)
-			indent(indentLevel + 1)
-			fmt.Printf("- key %d\n", binary.LittleEndian.Uint32(internalNodeKey(node, i)))
+		// Avoid printing nodes with 0 keys, since then we'd access invalid page.
+		if numKeys > 0 {
+			for i := uint32(0); i < numKeys; i++ {
+				child = binary.LittleEndian.Uint32(internalNodeChild(node, i))
+				displayTree(pager, child, indentLevel+1)
+				indent(indentLevel + 1)
+				fmt.Printf("- key %d\n", binary.LittleEndian.Uint32(internalNodeKey(node, i)))
+			}
 		}
 		child = binary.LittleEndian.Uint32(internalNodeRightChild(node))
 		displayTree(pager, child, indentLevel+1)

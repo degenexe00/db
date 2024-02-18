@@ -1,11 +1,14 @@
 package constants
 
+import "math"
+
 const (
 	CliName string = "simpleREPL"
 	DbName  string = "simpleDB"
 
-	PageSize      uint32 = 4096
-	TableMaxPages uint32 = 100
+	PageSize       uint32 = 4096
+	TableMaxPages  uint32 = 100
+	InvalidPageNum uint32 = math.MaxUint32
 
 	IdSize         uint32 = 4
 	UsernameSize   uint32 = 32
