@@ -46,3 +46,26 @@ const (
 	LeafNodeSpaceForcells uint32 = PageSize - LeafNodeHeaderSize
 	LeafNodeMaxCells      uint32 = LeafNodeSpaceForcells / LeafNodeCellSize
 )
+
+// Leaf Node Sizes
+const (
+	LeafNodeRightSplitCount uint32 = (LeafNodeMaxCells + 1) / 2
+	LeafNodeLeftSplitCount  uint32 = (LeafNodeMaxCells + 1) - LeafNodeRightSplitCount
+)
+
+// Internal Node Header Layout
+const (
+	InternalNodeNumKeysSize      uint32 = 4
+	InternalNodeNumKeysOffset           = uint32(CommonNodeHeaderSize)
+	InternalNodeRightChildSize   uint32 = 4
+	InternalNodeRightChildOffset        = InternalNodeNumKeysOffset + InternalNodeNumKeysSize
+	InternalNodeHeaderSize       uint32 = uint32(CommonNodeHeaderSize) + InternalNodeNumKeysSize + InternalNodeRightChildSize
+)
+
+// Internal Node Body Layout
+const (
+	InternalNodeKeySize   uint32 = 4
+	InternalNodeChildSize uint32 = 4
+	InternalNodeCellSize  uint32 = InternalNodeChildSize + InternalNodeKeySize
+	InternalNodeMaxCells  uint32 = 3 // Keep this small for testing.
+)

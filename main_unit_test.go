@@ -8,6 +8,7 @@ import (
 
 	"github.com/MichalPitr/db_from_scratch/pkg/cli"
 	"github.com/MichalPitr/db_from_scratch/pkg/constants"
+	"github.com/MichalPitr/db_from_scratch/pkg/types"
 )
 
 func TestNewDbRootType(t *testing.T) {
@@ -26,7 +27,7 @@ func TestNewDbRootType(t *testing.T) {
 	}
 
 	nt := getNodeType(node)
-	if nt != nodeLeaf {
+	if nt != types.NodeLeaf {
 		t.Errorf("Expected initial node to be leaf node.")
 	}
 
@@ -55,7 +56,7 @@ func TestInsertRow(t *testing.T) {
 	}
 
 	nt := getNodeType(node)
-	if nt != nodeLeaf {
+	if nt != types.NodeLeaf {
 		t.Errorf("Expected initial node to be leaf node.")
 	}
 
@@ -87,7 +88,7 @@ func TestInsertSplit(t *testing.T) {
 	}
 
 	nt := getNodeType(node)
-	if nt != nodeLeaf {
+	if nt != types.NodeLeaf {
 		t.Errorf("Expected initial node to be leaf node.")
 	}
 
@@ -108,7 +109,7 @@ func TestInsertSplit(t *testing.T) {
 	// Check internal node.
 	node = getPage(table.pager, 0)
 	nt = getNodeType(node)
-	if nt != nodeInternal {
+	if nt != types.NodeInternal {
 		t.Errorf("Expected internal node.")
 	}
 	numKeys := binary.LittleEndian.Uint32(internalNodeNumKeys(node))
@@ -132,7 +133,7 @@ func TestInsertSplit(t *testing.T) {
 		t.Errorf("Child's parent should be 0, got: %d", parentNum)
 	}
 	nt = getNodeType(leftChild)
-	if nt != nodeLeaf {
+	if nt != types.NodeLeaf {
 		t.Errorf("Expected leaf node.")
 	}
 	numCells = binary.LittleEndian.Uint32(leafNodeNumCells(leftChild))
@@ -147,7 +148,7 @@ func TestInsertSplit(t *testing.T) {
 		t.Errorf("Child's parent should be 0, got: %d", parentNum)
 	}
 	nt = getNodeType(rightChild)
-	if nt != nodeLeaf {
+	if nt != types.NodeLeaf {
 		t.Errorf("Expected leaf node.")
 	}
 	numCells = binary.LittleEndian.Uint32(leafNodeNumCells(rightChild))
@@ -202,7 +203,7 @@ func TestInsertSplitUnordered(t *testing.T) {
 	}
 
 	nt := getNodeType(node)
-	if nt != nodeInternal {
+	if nt != types.NodeInternal {
 		t.Fatalf("Expected root node to be internal node.")
 	}
 
@@ -229,7 +230,7 @@ func TestInsertSplitUnordered(t *testing.T) {
 	// Check internal node.
 	node = getPage(table.pager, 0)
 	nt = getNodeType(node)
-	if nt != nodeInternal {
+	if nt != types.NodeInternal {
 		t.Fatalf("Expected internal node.")
 	}
 
@@ -259,7 +260,7 @@ func TestInsertSplitUnordered(t *testing.T) {
 		t.Fatalf("Child's parent should be 0, got: %d", parentNum)
 	}
 	nt = getNodeType(firstChild)
-	if nt != nodeLeaf {
+	if nt != types.NodeLeaf {
 		t.Fatalf("Expected leaf node.")
 	}
 	numCells := binary.LittleEndian.Uint32(leafNodeNumCells(firstChild))
@@ -274,7 +275,7 @@ func TestInsertSplitUnordered(t *testing.T) {
 		t.Fatalf("Child's parent should be 0, got: %d", parentNum)
 	}
 	nt = getNodeType(secondChild)
-	if nt != nodeLeaf {
+	if nt != types.NodeLeaf {
 		t.Fatalf("Expected leaf node.")
 	}
 	numCells = binary.LittleEndian.Uint32(leafNodeNumCells(secondChild))
@@ -289,7 +290,7 @@ func TestInsertSplitUnordered(t *testing.T) {
 		t.Fatalf("Child's parent should be 0, got: %d", parentNum)
 	}
 	nt = getNodeType(rightChild)
-	if nt != nodeLeaf {
+	if nt != types.NodeLeaf {
 		t.Fatalf("Expected leaf node.")
 	}
 	numCells = binary.LittleEndian.Uint32(leafNodeNumCells(rightChild))

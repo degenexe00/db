@@ -11,6 +11,13 @@ const (
 	StmtSelect
 )
 
+type NodeType uint8
+
+const (
+	NodeInternal NodeType = iota
+	NodeLeaf
+)
+
 type Statement struct {
 	StmtType    statementType
 	RowToInsert Row
@@ -21,3 +28,5 @@ type Row struct {
 	Username [constants.UsernameSize]byte
 	Email    [constants.EmailSize]byte
 }
+
+type Page [constants.PageSize]byte

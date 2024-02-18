@@ -14,38 +14,6 @@ import (
 	"github.com/MichalPitr/db_from_scratch/pkg/types"
 )
 
-// Leaf Node Sizes
-const (
-	leafNodeRightSplitCount uint32 = (constants.LeafNodeMaxCells + 1) / 2
-	leafNodeLeftSplitCount  uint32 = (constants.LeafNodeMaxCells + 1) - leafNodeRightSplitCount
-)
-
-// Internal Node Header Layout
-const (
-	internalNodeNumKeysSize      uint32 = 4
-	internalNodeNumKeysOffset           = uint32(constants.CommonNodeHeaderSize)
-	internalNodeRightChildSize   uint32 = 4
-	internalNodeRightChildOffset        = internalNodeNumKeysOffset + internalNodeNumKeysSize
-	internalNodeHeaderSize       uint32 = uint32(constants.CommonNodeHeaderSize) + internalNodeNumKeysSize + internalNodeRightChildSize
-)
-
-// Internal Node Body Layout
-const (
-	internalNodeKeySize   uint32 = 4
-	internalNodeChildSize uint32 = 4
-	internalNodeCellSize  uint32 = internalNodeChildSize + internalNodeKeySize
-	internalNodeMaxCells  uint32 = 3 // Keep this small for testing.
-)
-
-type nodeType uint8
-
-const (
-	nodeInternal nodeType = iota
-	nodeLeaf
-)
-
-type Page [constants.PageSize]byte
-
 type Table struct {
 	pager       *Pager
 	rootPageNum uint32
@@ -55,7 +23,7 @@ type Pager struct {
 	file       *os.File
 	fileLength uint32
 	numPages   uint32
-	pages      [constants.TableMaxPages]*Page
+	pages      [constants.TableMaxPages]*types.Page
 }
 
 type Cursor struct {
@@ -80,7 +48,7 @@ func tableFind(table *Table, key uint32) *Cursor {
 	rootNode := getPage(table.pager, rootPageNum)
 	nodeType := getNodeType(rootNode)
 
-	if nodeType == nodeLeaf {
+	if nodeType == types.NodeLeaf {
 		return leafNodeFind(table, rootPageNum, key)
 	} else {
 		return internalNodeFind(table, rootPageNum, key)
@@ -113,7 +81,7 @@ func internalNodeFind(table *Table, pageNum uint32, key uint32) *Cursor {
 	childNum := binary.LittleEndian.Uint32(internalNodeChild(node, childIdx))
 	child := getPage(table.pager, childNum)
 	t := getNodeType(child)
-	if t == nodeLeaf {
+	if t == types.NodeLeaf {
 		return leafNodeFind(table, childNum, key)
 	}
 	return internalNodeFind(table, childNum, key)
@@ -149,11 +117,11 @@ func leafNodeFind(table *Table, pageNum uint32, key uint32) *Cursor {
 	return &cursor
 }
 
-func getNodeType(node []byte) nodeType {
-	return nodeType(node[constants.NodeTypeOffset])
+func getNodeType(node []byte) types.NodeType {
+	return types.NodeType(node[constants.NodeTypeOffset])
 }
 
-func setNodeType(node []byte, nt nodeType) {
+func setNodeType(node []byte, nt types.NodeType) {
 	node[constants.NodeTypeOffset] = byte(nt)
 }
 
@@ -179,29 +147,29 @@ func leafNodeValue(node []byte, cellNum uint32) []byte {
 }
 
 func initializeLeafNode(node []byte) {
-	setNodeType(node, nodeLeaf)
+	setNodeType(node, types.NodeLeaf)
 	setNodeRoot(node, false)
 	binary.LittleEndian.PutUint32(leafNodeNumCells(node), 0)
 	binary.LittleEndian.PutUint32(leafNodeNextLeaf(node), 0) // 0 represents no sibling
 }
 
 func initializeInternalNode(node []byte) {
-	setNodeType(node, nodeInternal)
+	setNodeType(node, types.NodeInternal)
 	setNodeRoot(node, false)
 	binary.LittleEndian.PutUint32(internalNodeNumKeys(node), 0)
 }
 
 func internalNodeNumKeys(node []byte) []byte {
-	return node[internalNodeNumKeysOffset : internalNodeNumKeysOffset+internalNodeNumKeysSize]
+	return node[constants.InternalNodeNumKeysOffset : constants.InternalNodeNumKeysOffset+constants.InternalNodeNumKeysSize]
 }
 
 func internalNodeRightChild(node []byte) []byte {
-	return node[internalNodeRightChildOffset : internalNodeRightChildOffset+internalNodeRightChildSize]
+	return node[constants.InternalNodeRightChildOffset : constants.InternalNodeRightChildOffset+constants.InternalNodeRightChildSize]
 }
 
 func internalNodeCell(node []byte, cellNum uint32) []byte {
-	offset := internalNodeHeaderSize + cellNum*internalNodeCellSize
-	res := node[offset : offset+internalNodeCellSize]
+	offset := constants.InternalNodeHeaderSize + cellNum*constants.InternalNodeCellSize
+	res := node[offset : offset+constants.InternalNodeCellSize]
 	return res
 }
 
@@ -216,7 +184,7 @@ func internalNodeChild(node []byte, childNum uint32) []byte {
 }
 
 func internalNodeKey(node []byte, keyNum uint32) []byte {
-	return internalNodeCell(node, keyNum)[internalNodeChildSize:]
+	return internalNodeCell(node, keyNum)[constants.InternalNodeChildSize:]
 }
 
 func nodeParent(node []byte) []byte {
@@ -243,10 +211,10 @@ func setNodeRoot(node []byte, isRoot bool) {
 
 func getNodeMaxKey(node []byte) uint32 {
 	switch getNodeType(node) {
-	case nodeInternal:
+	case types.NodeInternal:
 		numKeys := binary.LittleEndian.Uint32(internalNodeNumKeys(node)) - 1
 		return binary.LittleEndian.Uint32(internalNodeKey(node, numKeys))
-	case nodeLeaf:
+	case types.NodeLeaf:
 		numCells := binary.LittleEndian.Uint32(leafNodeNumCells(node)) - 1
 		return binary.LittleEndian.Uint32(leafNodeKey(node, numCells))
 	}
@@ -271,7 +239,7 @@ func internalNodeInsert(table *Table, parentPageNum uint32, childPageNum uint32)
 	originalNumKeys := binary.LittleEndian.Uint32(internalNodeNumKeys(parent))
 	binary.LittleEndian.PutUint32(internalNodeNumKeys(parent), originalNumKeys+1)
 
-	if originalNumKeys >= internalNodeMaxCells {
+	if originalNumKeys >= constants.InternalNodeMaxCells {
 		log.Fatal("Need to implement splitting inernal node.")
 		return
 	}
@@ -347,12 +315,12 @@ func leafNodeSplitAndInsert(cursor *Cursor, key uint32, value *types.Row) {
 	// Starting from the right, move each key to the correct position.
 	for i := int(constants.LeafNodeMaxCells); i >= 0; i-- {
 		var destNode = []byte{}
-		if uint32(i) >= leafNodeLeftSplitCount {
+		if uint32(i) >= constants.LeafNodeLeftSplitCount {
 			destNode = newNode
 		} else {
 			destNode = oldNode
 		}
-		indexWithinNode := uint32(i) % leafNodeLeftSplitCount
+		indexWithinNode := uint32(i) % constants.LeafNodeLeftSplitCount
 		destination := leafNodeCell(destNode, indexWithinNode)
 
 		if uint32(i) == cursor.cellNum {
@@ -368,8 +336,8 @@ func leafNodeSplitAndInsert(cursor *Cursor, key uint32, value *types.Row) {
 	}
 
 	// Update cell count on each leaf node
-	binary.LittleEndian.PutUint32(leafNodeNumCells(oldNode), leafNodeLeftSplitCount)
-	binary.LittleEndian.PutUint32(leafNodeNumCells(newNode), leafNodeRightSplitCount)
+	binary.LittleEndian.PutUint32(leafNodeNumCells(oldNode), constants.LeafNodeLeftSplitCount)
+	binary.LittleEndian.PutUint32(leafNodeNumCells(newNode), constants.LeafNodeRightSplitCount)
 
 	if isNodeRoot(oldNode) {
 		createNewRoot(cursor.table, newPageNum)
@@ -384,12 +352,12 @@ func leafNodeSplitAndInsert(cursor *Cursor, key uint32, value *types.Row) {
 }
 
 func formatNode(node []byte) {
-	nt := nodeType(node[constants.NodeTypeOffset])
-	if nt == nodeInternal {
+	nt := types.NodeType(node[constants.NodeTypeOffset])
+	if nt == types.NodeInternal {
 		isRoot := uint8(node[constants.IsRootOffset])
 		parentPtr := binary.LittleEndian.Uint32(node[constants.ParentPointerOffset:])
-		numKeys := binary.LittleEndian.Uint32(node[internalNodeNumKeysOffset:])
-		rightChildPtr := binary.LittleEndian.Uint32(node[internalNodeRightChildOffset:])
+		numKeys := binary.LittleEndian.Uint32(node[constants.InternalNodeNumKeysOffset:])
+		rightChildPtr := binary.LittleEndian.Uint32(node[constants.InternalNodeRightChildOffset:])
 
 		fmt.Printf("node type: %d\n", nt)
 		fmt.Printf("is root: %d\n", isRoot)
@@ -397,12 +365,12 @@ func formatNode(node []byte) {
 		fmt.Printf("num keys: %d\n", numKeys)
 		fmt.Printf("rightChildPtr: %d\n", rightChildPtr)
 
-		ptr := internalNodeHeaderSize
+		ptr := constants.InternalNodeHeaderSize
 		for i := uint32(0); i < numKeys; i++ {
 			childPtr := binary.LittleEndian.Uint32(node[ptr:])
-			childKey := binary.LittleEndian.Uint32(node[ptr+internalNodeChildSize:])
+			childKey := binary.LittleEndian.Uint32(node[ptr+constants.InternalNodeChildSize:])
 			fmt.Printf("child ptr: %d - key %d\n", childPtr, childKey)
-			ptr += internalNodeCellSize
+			ptr += constants.InternalNodeCellSize
 		}
 	} else {
 		isRoot := uint8(node[constants.IsRootOffset])
@@ -474,7 +442,7 @@ func displayTree(pager *Pager, pageNum uint32, indentLevel uint32) {
 	var numKeys, child uint32
 
 	switch getNodeType(node) {
-	case nodeLeaf:
+	case types.NodeLeaf:
 		numKeys = binary.LittleEndian.Uint32(leafNodeNumCells(node))
 		indent(indentLevel)
 		fmt.Printf("- leaf (size %d)\n", numKeys)
@@ -482,7 +450,7 @@ func displayTree(pager *Pager, pageNum uint32, indentLevel uint32) {
 			indent(indentLevel + 1)
 			fmt.Printf("- %d\n", binary.LittleEndian.Uint32(leafNodeKey(node, i)))
 		}
-	case nodeInternal:
+	case types.NodeInternal:
 		numKeys = binary.LittleEndian.Uint32(internalNodeNumKeys(node))
 		indent(indentLevel)
 		fmt.Printf("- internal (size %d)\n", numKeys)
@@ -521,7 +489,7 @@ func getPage(pager *Pager, pageNum uint32) []byte {
 
 	if pager.pages[pageNum] == nil {
 		// Cache miss. Allocate memory and load from file.
-		page := Page{}
+		page := types.Page{}
 		numPages := pager.fileLength / constants.PageSize
 
 		if pager.fileLength%constants.PageSize != 0 {
@@ -646,7 +614,7 @@ func pagerOpen(filename string) *Pager {
 		file:       f,
 		fileLength: uint32(fileSize),
 		numPages:   uint32(fileSize) / constants.PageSize,
-		pages:      [constants.TableMaxPages]*Page{},
+		pages:      [constants.TableMaxPages]*types.Page{},
 	}
 
 	if fileSize%int64(constants.PageSize) != 0 {
