@@ -2,73 +2,31 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"strings"
-)
 
-const cliName string = "simpleREPL"
-const dbName string = "simpleDB"
-
-const idSize uint32 = 4
-const usernameSize uint32 = 32
-const emailSize uint32 = 255
-const idOffset uint32 = 0
-const usernameOffset uint32 = idOffset + idSize
-const emailOffset uint32 = usernameOffset + usernameSize
-const rowSize uint32 = idSize + usernameSize + emailSize
-
-const pageSize uint32 = 4096
-const tableMaxPages uint32 = 100
-
-// Node Header Layout
-const (
-	nodeTypeSize         uint32 = 1
-	nodeTypeOffset       uint32 = 0
-	isRootSize           uint32 = 1
-	isRootOffset         uint32 = nodeTypeSize
-	parentPointerSize    uint32 = 4
-	parentPointerOffset  uint32 = isRootOffset + isRootSize
-	commonNodeHeaderSize uint8  = uint8(nodeTypeSize + isRootSize + parentPointerSize)
-)
-
-// Leaf Node Header Layout
-const (
-	leafNodeNumCellsSize   uint32 = 4
-	leafNodeNumCellsOffset uint32 = uint32(commonNodeHeaderSize)
-	leafNodeNextLeafSize   uint32 = 4
-	leafNodeNextLeafOffset uint32 = leafNodeNumCellsOffset + leafNodeNumCellsSize
-	leafNodeHeaderSize     uint32 = uint32(commonNodeHeaderSize) + leafNodeNumCellsSize + leafNodeNextLeafSize
-)
-
-// Leaf Node Body Layout
-const (
-	leafNodeKeySize       uint32 = 4
-	leafNodeKeyOffset     uint32 = 0
-	leafNodeValueSize            = rowSize
-	leafNodeValueOffset   uint32 = leafNodeKeyOffset + leafNodeKeySize
-	leafNodeCellSize      uint32 = leafNodeKeySize + leafNodeValueSize
-	leafNodeSpaceForcells uint32 = pageSize - leafNodeHeaderSize
-	leafNodeMaxCells      uint32 = leafNodeSpaceForcells / leafNodeCellSize
+	"github.com/MichalPitr/db_from_scratch/pkg/cli"
+	"github.com/MichalPitr/db_from_scratch/pkg/constants"
+	"github.com/MichalPitr/db_from_scratch/pkg/types"
 )
 
 // Leaf Node Sizes
 const (
-	leafNodeRightSplitCount uint32 = (leafNodeMaxCells + 1) / 2
-	leafNodeLeftSplitCount  uint32 = (leafNodeMaxCells + 1) - leafNodeRightSplitCount
+	leafNodeRightSplitCount uint32 = (constants.LeafNodeMaxCells + 1) / 2
+	leafNodeLeftSplitCount  uint32 = (constants.LeafNodeMaxCells + 1) - leafNodeRightSplitCount
 )
 
 // Internal Node Header Layout
 const (
 	internalNodeNumKeysSize      uint32 = 4
-	internalNodeNumKeysOffset           = uint32(commonNodeHeaderSize)
+	internalNodeNumKeysOffset           = uint32(constants.CommonNodeHeaderSize)
 	internalNodeRightChildSize   uint32 = 4
 	internalNodeRightChildOffset        = internalNodeNumKeysOffset + internalNodeNumKeysSize
-	internalNodeHeaderSize       uint32 = uint32(commonNodeHeaderSize) + internalNodeNumKeysSize + internalNodeRightChildSize
+	internalNodeHeaderSize       uint32 = uint32(constants.CommonNodeHeaderSize) + internalNodeNumKeysSize + internalNodeRightChildSize
 )
 
 // Internal Node Body Layout
@@ -86,29 +44,18 @@ const (
 	nodeLeaf
 )
 
-type Page [pageSize]byte
+type Page [constants.PageSize]byte
 
 type Table struct {
 	pager       *Pager
 	rootPageNum uint32
 }
 
-type Row struct {
-	id       uint32
-	username [usernameSize]byte
-	email    [emailSize]byte
-}
-
-type Statement struct {
-	stmtType    statementType
-	rowToInsert Row
-}
-
 type Pager struct {
 	file       *os.File
 	fileLength uint32
 	numPages   uint32
-	pages      [tableMaxPages]*Page
+	pages      [constants.TableMaxPages]*Page
 }
 
 type Cursor struct {
@@ -203,24 +150,24 @@ func leafNodeFind(table *Table, pageNum uint32, key uint32) *Cursor {
 }
 
 func getNodeType(node []byte) nodeType {
-	return nodeType(node[nodeTypeOffset])
+	return nodeType(node[constants.NodeTypeOffset])
 }
 
 func setNodeType(node []byte, nt nodeType) {
-	node[nodeTypeOffset] = byte(nt)
+	node[constants.NodeTypeOffset] = byte(nt)
 }
 
 func leafNodeNumCells(node []byte) []byte {
-	return node[leafNodeNumCellsOffset : leafNodeNumCellsOffset+leafNodeNumCellsSize]
+	return node[constants.LeafNodeNumCellsOffset : constants.LeafNodeNumCellsOffset+constants.LeafNodeNumCellsSize]
 }
 
 func leafNodeNextLeaf(node []byte) []byte {
-	return node[leafNodeNextLeafOffset : leafNodeNextLeafOffset+leafNodeNextLeafSize]
+	return node[constants.LeafNodeNextLeafOffset : constants.LeafNodeNextLeafOffset+constants.LeafNodeNextLeafSize]
 }
 
 func leafNodeCell(node []byte, cellNum uint32) []byte {
-	offset := leafNodeHeaderSize + cellNum*leafNodeCellSize
-	return node[offset : offset+leafNodeCellSize]
+	offset := constants.LeafNodeHeaderSize + cellNum*constants.LeafNodeCellSize
+	return node[offset : offset+constants.LeafNodeCellSize]
 }
 
 func leafNodeKey(node []byte, cellNum uint32) []byte {
@@ -228,7 +175,7 @@ func leafNodeKey(node []byte, cellNum uint32) []byte {
 }
 
 func leafNodeValue(node []byte, cellNum uint32) []byte {
-	return leafNodeCell(node, cellNum)[leafNodeKeySize : leafNodeKeySize+leafNodeValueSize]
+	return leafNodeCell(node, cellNum)[constants.LeafNodeKeySize : constants.LeafNodeKeySize+constants.LeafNodeValueSize]
 }
 
 func initializeLeafNode(node []byte) {
@@ -273,7 +220,7 @@ func internalNodeKey(node []byte, keyNum uint32) []byte {
 }
 
 func nodeParent(node []byte) []byte {
-	return node[parentPointerOffset : parentPointerOffset+parentPointerSize]
+	return node[constants.ParentPointerOffset : constants.ParentPointerOffset+constants.ParentPointerSize]
 }
 
 func updateInternalNodeKey(node []byte, oldKey uint32, newKey uint32) {
@@ -282,15 +229,15 @@ func updateInternalNodeKey(node []byte, oldKey uint32, newKey uint32) {
 }
 
 func isNodeRoot(node []byte) bool {
-	value := uint8(node[isRootOffset])
+	value := uint8(node[constants.IsRootOffset])
 	return value == 1
 }
 
 func setNodeRoot(node []byte, isRoot bool) {
 	if isRoot {
-		node[isRootOffset] = 1
+		node[constants.IsRootOffset] = 1
 	} else {
-		node[isRootOffset] = 0
+		node[constants.IsRootOffset] = 0
 	}
 }
 
@@ -386,7 +333,7 @@ leafNodeSplitAndInsert creates a new node and moves half of the cells over.
 Inserts the new value in one of the two nodes.
 Updates parent or creates a new parent.
 */
-func leafNodeSplitAndInsert(cursor *Cursor, key uint32, value *Row) {
+func leafNodeSplitAndInsert(cursor *Cursor, key uint32, value *types.Row) {
 	oldNode := getPage(cursor.table.pager, cursor.pageNum)
 	oldMax := getNodeMaxKey(oldNode)
 	newPageNum := getUnusedPageNum(cursor.table.pager)
@@ -398,7 +345,7 @@ func leafNodeSplitAndInsert(cursor *Cursor, key uint32, value *Row) {
 
 	// Existing keys should be divided evenly between old (left) and new (right) nodes.
 	// Starting from the right, move each key to the correct position.
-	for i := int(leafNodeMaxCells); i >= 0; i-- {
+	for i := int(constants.LeafNodeMaxCells); i >= 0; i-- {
 		var destNode = []byte{}
 		if uint32(i) >= leafNodeLeftSplitCount {
 			destNode = newNode
@@ -437,10 +384,10 @@ func leafNodeSplitAndInsert(cursor *Cursor, key uint32, value *Row) {
 }
 
 func formatNode(node []byte) {
-	nt := nodeType(node[nodeTypeOffset])
+	nt := nodeType(node[constants.NodeTypeOffset])
 	if nt == nodeInternal {
-		isRoot := uint8(node[isRootOffset])
-		parentPtr := binary.LittleEndian.Uint32(node[parentPointerOffset:])
+		isRoot := uint8(node[constants.IsRootOffset])
+		parentPtr := binary.LittleEndian.Uint32(node[constants.ParentPointerOffset:])
 		numKeys := binary.LittleEndian.Uint32(node[internalNodeNumKeysOffset:])
 		rightChildPtr := binary.LittleEndian.Uint32(node[internalNodeRightChildOffset:])
 
@@ -458,31 +405,31 @@ func formatNode(node []byte) {
 			ptr += internalNodeCellSize
 		}
 	} else {
-		isRoot := uint8(node[isRootOffset])
-		parentPtr := binary.LittleEndian.Uint32(node[parentPointerOffset:])
-		numCells := binary.LittleEndian.Uint32(node[leafNodeNumCellsOffset:])
-		nextLeafPageNum := binary.LittleEndian.Uint32(node[leafNodeNextLeafOffset:])
+		isRoot := uint8(node[constants.IsRootOffset])
+		parentPtr := binary.LittleEndian.Uint32(node[constants.ParentPointerOffset:])
+		numCells := binary.LittleEndian.Uint32(node[constants.LeafNodeNumCellsOffset:])
+		nextLeafPageNum := binary.LittleEndian.Uint32(node[constants.LeafNodeNextLeafOffset:])
 		fmt.Printf("node type: %d\n", nt)
 		fmt.Printf("is root: %d\n", isRoot)
 		fmt.Printf("parent ptr: %d\n", parentPtr)
 		fmt.Printf("num cells: %d\n", numCells)
 		fmt.Printf("next leaf page num: %d\n", nextLeafPageNum)
 
-		i := leafNodeHeaderSize
-		for i+leafNodeCellSize < pageSize {
+		i := constants.LeafNodeHeaderSize
+		for i+constants.LeafNodeCellSize < constants.PageSize {
 			key := binary.LittleEndian.Uint32(node[i:])
-			row := deserializeRow(node[i+leafNodeKeySize:])
+			row := deserializeRow(node[i+constants.LeafNodeKeySize:])
 			fmt.Printf("key: %d - row %+v\n", key, row)
-			i += leafNodeCellSize
+			i += constants.LeafNodeCellSize
 		}
 		fmt.Printf("Leaf Node ends at offset %d\n", i)
 	}
 }
 
-func leafNodeInsert(cursor *Cursor, key uint32, value *Row) {
+func leafNodeInsert(cursor *Cursor, key uint32, value *types.Row) {
 	node := getPage(cursor.table.pager, cursor.pageNum)
 	numCells := binary.LittleEndian.Uint32(leafNodeNumCells(node))
-	if numCells >= leafNodeMaxCells {
+	if numCells >= constants.LeafNodeMaxCells {
 		// Node is full.
 		leafNodeSplitAndInsert(cursor, key, value)
 		return
@@ -514,34 +461,6 @@ func (c *Cursor) advance() {
 			c.cellNum = 0
 		}
 	}
-}
-
-type statementType int
-
-const (
-	stmtInsert statementType = iota
-	stmtSelect
-)
-
-func printPrompt() {
-	fmt.Printf("%v> ", dbName)
-}
-
-func displayHelp() {
-	fmt.Printf("Welcome to %v! These are the available commands:\n", cliName)
-	fmt.Println(".help    - Show available commands")
-	fmt.Println(".clear   - Clear the terminal screen")
-	fmt.Println(".exit    - Closes your connection to", dbName)
-}
-
-func displayConstants() {
-	fmt.Println("Constants:")
-	fmt.Printf("rowSize: %d\n", rowSize)
-	fmt.Printf("commonNodeHeaderSize: %d\n", commonNodeHeaderSize)
-	fmt.Printf("leafNodeHeaderSize: %d\n", leafNodeHeaderSize)
-	fmt.Printf("leafNodeCellSize: %d\n", leafNodeCellSize)
-	fmt.Printf("leafNodeSpaceForCells: %d\n", leafNodeSpaceForcells)
-	fmt.Printf("leafNodeMaxCells: %d\n", leafNodeMaxCells)
 }
 
 func indent(level uint32) {
@@ -595,22 +514,22 @@ func handleCmd(cmd string) {
 }
 
 func getPage(pager *Pager, pageNum uint32) []byte {
-	if pageNum > tableMaxPages {
-		fmt.Printf("tried to fetch page number out of bounds. %d > %d\n", pageNum, tableMaxPages)
+	if pageNum > constants.TableMaxPages {
+		fmt.Printf("tried to fetch page number out of bounds. %d > %d\n", pageNum, constants.TableMaxPages)
 		os.Exit(1)
 	}
 
 	if pager.pages[pageNum] == nil {
 		// Cache miss. Allocate memory and load from file.
 		page := Page{}
-		numPages := pager.fileLength / pageSize
+		numPages := pager.fileLength / constants.PageSize
 
-		if pager.fileLength%pageSize != 0 {
+		if pager.fileLength%constants.PageSize != 0 {
 			numPages++
 		}
 
 		if pageNum < numPages {
-			pager.file.Seek(int64(pageNum*pageSize), 0)
+			pager.file.Seek(int64(pageNum*constants.PageSize), 0)
 			n, err := pager.file.Read(page[:])
 			if err != nil {
 				fmt.Printf("error reading file: %d\n", n)
@@ -649,67 +568,28 @@ func (c *Cursor) Value() ([]byte, error) {
 	return leafNodeValue(page, c.cellNum), nil
 }
 
-func serializeRow(r *Row) []byte {
-	buf := make([]byte, rowSize)
-	binary.LittleEndian.PutUint32(buf[idOffset:], r.id)
-	copy(buf[usernameOffset:], r.username[:])
-	copy(buf[emailOffset:], r.email[:])
+func serializeRow(r *types.Row) []byte {
+	buf := make([]byte, constants.RowSize)
+	binary.LittleEndian.PutUint32(buf[constants.IdOffset:], r.Id)
+	copy(buf[constants.UsernameOffset:], r.Username[:])
+	copy(buf[constants.EmailOffset:], r.Email[:])
 	return buf
 }
 
-func deserializeRow(buf []byte) Row {
-	r := Row{}
-	r.id = binary.LittleEndian.Uint32(buf[:idSize])
-	copy(r.username[:], buf[usernameOffset:usernameOffset+usernameSize])
-	copy(r.email[:], buf[emailOffset:emailOffset+emailSize])
+func deserializeRow(buf []byte) types.Row {
+	r := types.Row{}
+	r.Id = binary.LittleEndian.Uint32(buf[:constants.IdSize])
+	copy(r.Username[:], buf[constants.UsernameOffset:constants.UsernameOffset+constants.UsernameSize])
+	copy(r.Email[:], buf[constants.EmailOffset:constants.EmailOffset+constants.EmailSize])
 	return r
 }
 
-func prepareStatement(text string) (*Statement, error) {
-	if strings.EqualFold(text[:6], "insert") {
-		stmt := Statement{
-			stmtType:    stmtInsert,
-			rowToInsert: Row{},
-		}
-		var username, email string
-		n, err := fmt.Sscanf(text, "insert %d %s %s", &stmt.rowToInsert.id, &username, &email)
-		if err != nil {
-			return nil, err
-		}
-		if n < 3 {
-			return nil, fmt.Errorf("expected 3 arguments for insert, but got %d", n)
-		}
-
-		if len(username) > int(usernameSize) {
-			return nil, fmt.Errorf("string is too long")
-		}
-
-		if len(email) > int(emailSize) {
-			return nil, fmt.Errorf("string is too long")
-		}
-
-		copy(stmt.rowToInsert.username[:], []byte(username))
-		copy(stmt.rowToInsert.email[:], []byte(email))
-		return &stmt, nil
-	}
-	if strings.EqualFold(text, "select") {
-		return &Statement{stmtType: stmtSelect}, nil
-	}
-	return nil, fmt.Errorf("unknown statement: %v", text)
-}
-
-func printRow(row Row) {
-	username := string(bytes.Trim(row.username[:], "\x00"))
-	email := string(bytes.Trim(row.email[:], "\x00"))
-	fmt.Printf("(%d, %s, %s)\n", row.id, username, email)
-}
-
-func executeInsert(stmt *Statement, table *Table) error {
+func executeInsert(stmt *types.Statement, table *Table) error {
 	node := getPage(table.pager, table.rootPageNum)
 	numCells := binary.LittleEndian.Uint32(leafNodeNumCells(node))
 
-	rowToInsert := stmt.rowToInsert
-	keyToInsert := rowToInsert.id
+	rowToInsert := stmt.RowToInsert
+	keyToInsert := rowToInsert.Id
 	cursor := tableFind(table, keyToInsert)
 
 	if cursor.cellNum < numCells {
@@ -718,11 +598,11 @@ func executeInsert(stmt *Statement, table *Table) error {
 			return fmt.Errorf("duplicate key")
 		}
 	}
-	leafNodeInsert(cursor, rowToInsert.id, &rowToInsert)
+	leafNodeInsert(cursor, rowToInsert.Id, &rowToInsert)
 	return nil
 }
 
-func executeSelect(stmt *Statement, table *Table) error {
+func executeSelect(stmt *types.Statement, table *Table) error {
 	cursor := tableStart(table)
 	for !cursor.endOfTable {
 		rawRow, err := cursor.Value()
@@ -730,18 +610,18 @@ func executeSelect(stmt *Statement, table *Table) error {
 			return err
 		}
 		row := deserializeRow(rawRow)
-		printRow(row)
+		cli.PrintRow(row)
 		cursor.advance()
 	}
 	return nil
 }
 
-func executeStatement(stmt *Statement, table *Table) {
+func executeStatement(stmt *types.Statement, table *Table) {
 	var err error
-	switch stmt.stmtType {
-	case stmtInsert:
+	switch stmt.StmtType {
+	case types.StmtInsert:
 		err = executeInsert(stmt, table)
-	case stmtSelect:
+	case types.StmtSelect:
 		err = executeSelect(stmt, table)
 	}
 	if err != nil {
@@ -765,14 +645,14 @@ func pagerOpen(filename string) *Pager {
 	pager := Pager{
 		file:       f,
 		fileLength: uint32(fileSize),
-		numPages:   uint32(fileSize) / pageSize,
-		pages:      [tableMaxPages]*Page{},
+		numPages:   uint32(fileSize) / constants.PageSize,
+		pages:      [constants.TableMaxPages]*Page{},
 	}
 
-	if fileSize%int64(pageSize) != 0 {
+	if fileSize%int64(constants.PageSize) != 0 {
 		log.Fatal("Db file is not a whole number of pages. Corrupt file.\n")
 	}
-	for i := uint32(0); i < tableMaxPages; i++ {
+	for i := uint32(0); i < constants.TableMaxPages; i++ {
 		pager.pages[i] = nil
 	}
 	return &pager
@@ -783,7 +663,7 @@ func pagerFlush(pager *Pager, pageNum uint32) {
 		log.Fatal("Tried to flush null page")
 	}
 
-	_, err := pager.file.WriteAt(pager.pages[pageNum][:], int64(pageNum*pageSize))
+	_, err := pager.file.WriteAt(pager.pages[pageNum][:], int64(pageNum*constants.PageSize))
 	if err != nil {
 		log.Fatalf("Error writing to file: %v", err)
 	}
@@ -810,16 +690,16 @@ func main() {
 	table := dbOpen(os.Args[1])
 	reader := bufio.NewScanner(os.Stdin)
 	commands := map[string]interface{}{
-		".help":  displayHelp,
+		".help":  cli.DisplayHelp,
 		".clear": clearScreen,
 		".btree": func() {
 			fmt.Println("Tree:")
 			displayTree(table.pager, 0, 0)
 		}, // neat hack.
-		".constants": displayConstants,
+		".constants": cli.DisplayConstants,
 	}
 	for {
-		printPrompt()
+		cli.PrintPrompt()
 		reader.Scan()
 		text := cleanInput(reader.Text())
 		if text[0] == '.' {
@@ -836,7 +716,7 @@ func main() {
 				handleCmd(text)
 			}
 		} else {
-			stmt, err := prepareStatement(text)
+			stmt, err := cli.PrepareStatement(text)
 			if err != nil {
 				fmt.Printf("Error: %v.\n", err)
 				continue

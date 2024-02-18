@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"os"
 	"testing"
+
+	"github.com/MichalPitr/db_from_scratch/pkg/cli"
+	"github.com/MichalPitr/db_from_scratch/pkg/constants"
 )
 
 func TestNewDbRootType(t *testing.T) {
@@ -18,7 +21,7 @@ func TestNewDbRootType(t *testing.T) {
 	}
 
 	node := getPage(table.pager, 0)
-	if len(node) != int(pageSize) {
+	if len(node) != int(constants.PageSize) {
 		t.Errorf("Expected page to be 4096 in size.")
 	}
 
@@ -38,7 +41,7 @@ func TestInsertRow(t *testing.T) {
 	os.Remove(dbName)
 	table := dbOpen(dbName)
 
-	stmt, _ := prepareStatement("insert 1 user1 user1@example.com")
+	stmt, _ := cli.PrepareStatement("insert 1 user1 user1@example.com")
 	executeInsert(stmt, table)
 
 	// Should have 1 leaf page.
@@ -47,7 +50,7 @@ func TestInsertRow(t *testing.T) {
 	}
 
 	node := getPage(table.pager, 0)
-	if len(node) != int(pageSize) {
+	if len(node) != int(constants.PageSize) {
 		t.Errorf("Expected page to be 4096 in size.")
 	}
 
@@ -68,8 +71,8 @@ func TestInsertSplit(t *testing.T) {
 	table := dbOpen(dbName)
 
 	// Fill up page, next insert should trigger split.
-	for i := 0; i < int(leafNodeMaxCells); i++ {
-		stmt, _ := prepareStatement(fmt.Sprintf("insert %d user%d user%d@example.com", i, i, i))
+	for i := 0; i < int(constants.LeafNodeMaxCells); i++ {
+		stmt, _ := cli.PrepareStatement(fmt.Sprintf("insert %d user%d user%d@example.com", i, i, i))
 		executeInsert(stmt, table)
 	}
 
@@ -79,7 +82,7 @@ func TestInsertSplit(t *testing.T) {
 	}
 
 	node := getPage(table.pager, 0)
-	if len(node) != int(pageSize) {
+	if len(node) != int(constants.PageSize) {
 		t.Errorf("Expected page to be 4096 in size.")
 	}
 
@@ -89,12 +92,12 @@ func TestInsertSplit(t *testing.T) {
 	}
 
 	numCells := binary.LittleEndian.Uint32(leafNodeNumCells(node))
-	if numCells != leafNodeMaxCells {
+	if numCells != constants.LeafNodeMaxCells {
 		t.Error("Expected 1 cell in node.")
 	}
 
 	// Insert 1 more row to trigger split.
-	stmt, _ := prepareStatement("insert 14 user14 user14@example.com")
+	stmt, _ := cli.PrepareStatement("insert 14 user14 user14@example.com")
 	executeInsert(stmt, table)
 
 	// Should have 2 leaf nodes, 1 root internal node.
@@ -184,7 +187,7 @@ func TestInsertSplitUnordered(t *testing.T) {
 	}
 
 	for _, cmd := range commands {
-		stmt, _ := prepareStatement(cmd)
+		stmt, _ := cli.PrepareStatement(cmd)
 		executeInsert(stmt, table)
 	}
 
@@ -194,7 +197,7 @@ func TestInsertSplitUnordered(t *testing.T) {
 	}
 
 	node := getPage(table.pager, 0)
-	if len(node) != int(pageSize) {
+	if len(node) != int(constants.PageSize) {
 		t.Errorf("Expected page to be 4096 in size.")
 	}
 
@@ -215,7 +218,7 @@ func TestInsertSplitUnordered(t *testing.T) {
 	fmt.Println(pageNum)
 
 	// Insert 1 more row to trigger split.
-	stmt, _ := prepareStatement("insert 14 user14 user14@example.com")
+	stmt, _ := cli.PrepareStatement("insert 14 user14 user14@example.com")
 	executeInsert(stmt, table)
 
 	// Should have 3 leaf nodes, 1 root internal node.
