@@ -3,6 +3,8 @@ package cli
 import (
 	"bytes"
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/MichalPitr/db_from_scratch/pkg/constants"
@@ -67,4 +69,26 @@ func DisplayConstants() {
 	fmt.Printf("leafNodeCellSize: %d\n", constants.LeafNodeCellSize)
 	fmt.Printf("leafNodeSpaceForCells: %d\n", constants.LeafNodeSpaceForcells)
 	fmt.Printf("leafNodeMaxCells: %d\n", constants.LeafNodeMaxCells)
+}
+
+func ClearScreen() {
+	cmd := exec.Command("clear")
+	cmd.Stdout = os.Stdout
+	cmd.Run()
+}
+
+func CleanInput(text string) string {
+	output := strings.TrimSpace(text)
+	output = strings.ToLower(output)
+	return output
+}
+
+func HandleCmd(cmd string) {
+	fmt.Printf("Unknown command: %v\n", cmd)
+}
+
+func Indent(level uint32) {
+	for i := uint32(0); i < level; i++ {
+		fmt.Printf("  ")
+	}
 }
