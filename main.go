@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/MichalPitr/db_from_scratch/pkg/cli"
@@ -465,22 +464,6 @@ func displayTree(pager *Pager, pageNum uint32, indentLevel uint32) {
 	}
 }
 
-func clearScreen() {
-	cmd := exec.Command("clear")
-	cmd.Stdout = os.Stdout
-	cmd.Run()
-}
-
-func cleanInput(text string) string {
-	output := strings.TrimSpace(text)
-	output = strings.ToLower(output)
-	return output
-}
-
-func handleCmd(cmd string) {
-	fmt.Printf("Unknown command: %v\n", cmd)
-}
-
 func getPage(pager *Pager, pageNum uint32) []byte {
 	if pageNum > constants.TableMaxPages {
 		fmt.Printf("tried to fetch page number out of bounds. %d > %d\n", pageNum, constants.TableMaxPages)
@@ -659,7 +642,7 @@ func main() {
 	reader := bufio.NewScanner(os.Stdin)
 	commands := map[string]interface{}{
 		".help":  cli.DisplayHelp,
-		".clear": clearScreen,
+		".clear": cli.ClearScreen,
 		".btree": func() {
 			fmt.Println("Tree:")
 			displayTree(table.pager, 0, 0)
@@ -669,7 +652,7 @@ func main() {
 	for {
 		cli.PrintPrompt()
 		reader.Scan()
-		text := cleanInput(reader.Text())
+		text := cli.CleanInput(reader.Text())
 		if text[0] == '.' {
 			// Handle meta command starting with ".".
 			if cmd, ok := commands[text]; ok {
@@ -681,7 +664,7 @@ func main() {
 				}
 				return
 			} else {
-				handleCmd(text)
+				cli.HandleCmd(text)
 			}
 		} else {
 			stmt, err := cli.PrepareStatement(text)
