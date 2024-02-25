@@ -378,3 +378,17 @@ func TestInsertInternalNodeSplit(t *testing.T) {
 
 	// Expect no crash.
 }
+
+func TestInsertMaxSize(t *testing.T) {
+	dbName := "test.db"
+	os.Remove(dbName)
+	table := dbOpen(dbName)
+
+	// Fill up page, next insert should trigger split.
+	for i := 0; i < 384; i++ {
+		stmt, _ := cli.PrepareStatement(fmt.Sprintf("insert %d user%d user%d@example.com", i, i, i))
+		executeInsert(stmt, table)
+	}
+	displayTree(table.pager, 0, 0)
+	// Expect no crash.
+}

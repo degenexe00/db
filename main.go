@@ -536,7 +536,6 @@ func leafNodeInsert(cursor *Cursor, key uint32, value *types.Row) {
 	node := getPage(cursor.table.pager, cursor.pageNum)
 	numCells := binary.LittleEndian.Uint32(leafNodeNumCells(node))
 	if numCells >= constants.LeafNodeMaxCells {
-		// Node is full.
 		leafNodeSplitAndInsert(cursor, key, value)
 		return
 	}
@@ -607,8 +606,8 @@ func displayTree(pager *Pager, pageNum uint32, indentLevel uint32) {
 }
 
 func getPage(pager *Pager, pageNum uint32) []byte {
-	if pageNum > constants.TableMaxPages {
-		fmt.Printf("tried to fetch page number out of bounds. %d > %d\n", pageNum, constants.TableMaxPages)
+	if pageNum >= constants.TableMaxPages {
+		fmt.Printf("tried to fetch page number out of bounds. %d >= %d\n", pageNum, constants.TableMaxPages)
 		os.Exit(1)
 	}
 
