@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -40,6 +41,22 @@ func PrepareStatement(text string) (*types.Statement, error) {
 	}
 	if strings.EqualFold(text, "select") {
 		return &types.Statement{StmtType: types.StmtSelect}, nil
+	}
+	if strings.EqualFold(text[:6], "delete") {
+		stmt := types.Statement{
+			StmtType: types.StmtDelete,
+		}
+		var rowId uint32
+		n, err := fmt.Sscanf(text, "delete %d", &rowId)
+		if err != nil {
+			return nil, err
+		}
+		if n < 1 {
+			return nil, fmt.Errorf("expected 1 argument for delete, but got %d", n)
+		}
+		stmt.RowToDelete = rowId
+		log.Printf("TODO: Implement delete support., cmd: %+v", stmt)
+		return &stmt, nil
 	}
 	return nil, fmt.Errorf("unknown statement: %v", text)
 }

@@ -392,3 +392,72 @@ func TestInsertMaxSize(t *testing.T) {
 	displayTree(table.pager, 0, 0)
 	// Expect no crash.
 }
+
+func TestInternalNodeFindKey(t *testing.T) {
+	node := [4096]byte{}
+	binary.LittleEndian.PutUint32(internalNodeKey(node[:], 0), 1)
+	binary.LittleEndian.PutUint32(internalNodeKey(node[:], 1), 2)
+	binary.LittleEndian.PutUint32(internalNodeKey(node[:], 2), 3)
+	i, ok := internalNodeFindKey(node[:], 1)
+	if !ok {
+		t.Fatalf("Got: true, Expected: false")
+	}
+	if got, want := i, uint32(0); got != want {
+		t.Fatalf("Incorrect returned index for key. Got: %d, Want: %d", got, want)
+	}
+}
+
+func TestDeleteLargestKeyLeftSubtree(t *testing.T) {
+	dbName := "test.db"
+	os.Remove(dbName)
+	table := dbOpen(dbName)
+
+	// Fill up page, next insert should trigger split.
+	for i := 1; i < 16; i++ {
+		stmt, _ := cli.PrepareStatement(fmt.Sprintf("insert %d user%d user%d@example.com", i, i, i))
+		executeInsert(stmt, table)
+	}
+
+	displayTree(table.pager, 0, 0)
+	stmt, _ := cli.PrepareStatement(fmt.Sprintf("delete 7"))
+	executeDelete(stmt, table)
+	// For now, verify with debugger.
+	// TODO: Add check if key is indeed deleted.
+}
+
+func TestDeleteLargestKeyRightSubtree(t *testing.T) {
+	dbName := "test.db"
+	os.Remove(dbName)
+	table := dbOpen(dbName)
+
+	// Fill up page, next insert should trigger split.
+	for i := 1; i < 16; i++ {
+		stmt, _ := cli.PrepareStatement(fmt.Sprintf("insert %d user%d user%d@example.com", i, i, i))
+		executeInsert(stmt, table)
+	}
+
+	displayTree(table.pager, 0, 0)
+	stmt, _ := cli.PrepareStatement(fmt.Sprintf("delete 15"))
+	// Expect the row to be deleted, but nothing in parent, since right-most leaf
+	// is referenced by a right-pointer without a key.
+	executeDelete(stmt, table)
+	// For now, verify with debuger.
+	// TODO: Add check if key is deleted.
+}
+
+func TestDeleteLastItemInRootNode(t *testing.T) {
+	dbName := "test.db"
+	os.Remove(dbName)
+	table := dbOpen(dbName)
+
+	stmt, _ := cli.PrepareStatement("insert 1 user1 user1@example.com")
+	executeInsert(stmt, table)
+
+	displayTree(table.pager, 0, 0)
+	stmt, _ = cli.PrepareStatement(fmt.Sprintf("delete 1"))
+	// Expect the row to be deleted, but nothing in parent, since right-most leaf
+	// is referenced by a right-pointer without a key.
+	executeDelete(stmt, table)
+	// For now, verify with debuger.
+	// TODO: Add check if key is deleted.
+}

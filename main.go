@@ -203,6 +203,7 @@ func internalNodeKey(node []byte, keyNum uint32) []byte {
 	return internalNodeCell(node, keyNum)[constants.InternalNodeChildSize:]
 }
 
+// nodeParent returns the bytes containing the page number of this node's parent
 func nodeParent(node []byte) []byte {
 	return node[constants.ParentPointerOffset : constants.ParentPointerOffset+constants.ParentPointerSize]
 }
@@ -556,7 +557,7 @@ func (c *Cursor) advance() {
 	c.cellNum++
 	numCells := binary.LittleEndian.Uint32(leafNodeNumCells(node))
 	if c.cellNum >= numCells {
-		// Advane to the next leaf node.
+		// Advance to the next leaf node.
 		nextPageNum := binary.LittleEndian.Uint32(leafNodeNextLeaf(node))
 		if nextPageNum == 0 {
 			// This is the rightmost leaf.
@@ -566,6 +567,102 @@ func (c *Cursor) advance() {
 			c.cellNum = 0
 		}
 	}
+}
+
+// internalNodeFindKey returns the index of the cell exactly matching the provided key.
+// If such key doesn't exist, second return value is false.
+func internalNodeFindKey(node []byte, key uint32) (uint32, bool) {
+	numKeys := binary.LittleEndian.Uint32(internalNodeNumKeys(node))
+	// Binary search
+	minIdx := uint32(0)
+	maxIdx := numKeys
+	for minIdx != maxIdx {
+		midIdx := (maxIdx-minIdx)/2 + minIdx // mid without overflow
+		keyToRight := binary.LittleEndian.Uint32(internalNodeKey(node, midIdx))
+		if keyToRight >= key {
+			maxIdx = midIdx
+		} else {
+			minIdx = midIdx + 1
+		}
+	}
+	if keyToRight := binary.LittleEndian.Uint32(internalNodeKey(node, minIdx)); keyToRight != key {
+		return 0, false
+	}
+
+	return minIdx, true
+}
+
+func executeDelete(stmt *types.Statement, table *Table) error {
+	/*
+		1) Find leaf node that should contain the key.
+		2) If key not in the node, terminate search as key does not exist.
+		3) If it exists, remove the cell
+		4) shift all cells to the right to the left by 1
+		5) if the number of cells >= minCellsLeafNode, delete terminates here.
+		6) Otherwise, must restructure the node by merging with neighbors
+		7) TODO: restucturing follows up as a next step.
+	*/
+	keyToDelete := stmt.RowToDelete
+	cursor := tableFind(table, keyToDelete)
+	fmt.Println(cursor.cellNum)
+	node := getPage(table.pager, cursor.pageNum)
+	numCells := binary.LittleEndian.Uint32(leafNodeNumCells(node))
+	formatNode(node)
+
+	if cursor.cellNum >= numCells {
+		return fmt.Errorf("key %d does not exist", keyToDelete)
+	}
+
+	keyAtIndex := binary.LittleEndian.Uint32(leafNodeKey(node, cursor.cellNum))
+	if keyAtIndex != keyToDelete {
+		return fmt.Errorf("key %d does not exist", keyToDelete)
+	}
+
+	row, err := cursor.Value()
+	if err != nil {
+		return err
+	}
+	log.Printf("Found row to delete: %v", deserializeRow(row))
+
+	// 2) Move all cells above the deleted row 1 level down.
+
+	for i := cursor.cellNum + 1; i < numCells; i++ {
+		copy(leafNodeCell(node, i-1), leafNodeCell(node, i))
+	}
+
+	// Update node's cellnum.
+	// TODO: handle deleting last cell in node:
+	if numCells-1 == 0 {
+		log.Printf("Deleted last cell from leaf node.")
+		// TODO: remove node
+		// Update parent pointers to this node
+	}
+	binary.LittleEndian.PutUint32(leafNodeNumCells(node), numCells-1)
+	newMaxKey := binary.LittleEndian.Uint32(leafNodeKey(node, numCells-2))
+
+	if keyToDelete < newMaxKey {
+		// Can stop delete here since parent's key for this node is unchanged.
+		return nil
+	}
+
+	// TODO:
+	// Add underflow node merging support.
+
+	// Update the maxKey in parent.
+	for !isNodeRoot(node) {
+		parent := getPage(table.pager, binary.LittleEndian.Uint32(nodeParent(node)))
+		idx, ok := internalNodeFindKey(parent, keyToDelete)
+		if !ok {
+			// This key wasn't the max, so can stop delete op here.
+			return nil
+		}
+		// Update parent's key associated with this cell.
+		binary.LittleEndian.PutUint32(internalNodeKey(parent, idx), newMaxKey)
+		// Update node to be the current parent so that we traverse up towards root.
+		node = parent
+	}
+
+	return nil
 }
 
 func indent(level uint32) {
@@ -607,7 +704,7 @@ func displayTree(pager *Pager, pageNum uint32, indentLevel uint32) {
 
 func getPage(pager *Pager, pageNum uint32) []byte {
 	if pageNum >= constants.TableMaxPages {
-		fmt.Printf("tried to fetch page number out of bounds. %d >= %d\n", pageNum, constants.TableMaxPages)
+		fmt.Printf("tried to fetch page number out of bounds. %d > %d\n", pageNum, constants.TableMaxPages)
 		os.Exit(1)
 	}
 
@@ -715,6 +812,8 @@ func executeStatement(stmt *types.Statement, table *Table) {
 		err = executeInsert(stmt, table)
 	case types.StmtSelect:
 		err = executeSelect(stmt, table)
+	case types.StmtDelete:
+		err = executeDelete(stmt, table)
 	}
 	if err != nil {
 		fmt.Printf("Error: %v\n", err.Error())

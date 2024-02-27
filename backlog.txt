@@ -1,2 +1,9 @@
-debug keyToRight numerical issue
-Either numKeys set incorrectly or the node wasn't updated correctly
+Delete support:
+* Delete single row
+* Delete last item in node:
+* Propagate deleted row up to root if necessary
+* merge underflowing leaf nodes
+* merge underflowing internal nodes
+
+Insert:
+* Do we support inserting if node is full? 

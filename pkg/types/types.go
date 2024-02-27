@@ -9,6 +9,7 @@ type statementType int
 const (
 	StmtInsert statementType = iota
 	StmtSelect
+	StmtDelete
 )
 
 type NodeType uint8
@@ -21,6 +22,7 @@ const (
 type Statement struct {
 	StmtType    statementType
 	RowToInsert Row
+	RowToDelete uint32
 }
 
 type Row struct {
